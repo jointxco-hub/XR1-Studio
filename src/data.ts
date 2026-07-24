@@ -1,12 +1,12 @@
 import type { Project, TimelineTrack } from './types'
 
 export const defaultTimelineTracks: TimelineTrack[] = [
-  { id:'v3', label:'V3 · Titles', kind:'video', order:0, locked:false, muted:false, hidden:false, color:'#ffb75b' },
-  { id:'v2', label:'V2 · B-roll', kind:'video', order:1, locked:false, muted:false, hidden:false, color:'#c8a8ff' },
-  { id:'v1', label:'V1 · Main story', kind:'video', order:2, locked:false, muted:false, hidden:false, color:'#c8ff2f' },
-  { id:'a2', label:'A2 · Music', kind:'audio', order:3, locked:false, muted:false, hidden:false, color:'#ff9eb5' },
-  { id:'a1', label:'A1 · Original', kind:'audio', order:4, locked:false, muted:false, hidden:false, color:'#7ed3ff' },
-  { id:'cc', label:'CC · Captions', kind:'captions', order:5, locked:false, muted:false, hidden:false, color:'#f3e87c' },
+  { id:'v3', label:'V3 · Titles', kind:'video', order:0, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#ffb75b' },
+  { id:'v2', label:'V2 · B-roll', kind:'video', order:1, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#c8a8ff' },
+  { id:'v1', label:'V1 · Main story', kind:'video', order:2, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#c8ff2f' },
+  { id:'a2', label:'A2 · Music', kind:'audio', order:3, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#ff9eb5' },
+  { id:'a1', label:'A1 · Original', kind:'audio', order:4, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#7ed3ff' },
+  { id:'cc', label:'CC · Captions', kind:'captions', order:5, locked:false, muted:false, hidden:false, targeted:true, syncLocked:true, color:'#f3e87c' },
 ]
 
 export const starterProject: Project = {
@@ -99,6 +99,7 @@ export const starterProject: Project = {
   timelineTracks: defaultTimelineTracks,
   timelineClips: [],
   timelineMarkers: [],
+  editorSettings: { aspectRatio: '16:9', background: '#080906' },
   publish: {
     title: 'Why We Built Our Own Invoice System',
     description: 'A behind-the-scenes look at why Joint X brought invoicing into OPPS — and why the real value is not the PDF, but the operational visibility around it.\n\nPart of Daily Doses: building Joint X in public.',

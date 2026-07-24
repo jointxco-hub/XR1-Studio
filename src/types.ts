@@ -87,7 +87,16 @@ export type TimelineTrack = {
   locked: boolean
   muted: boolean
   hidden: boolean
+  targeted: boolean
+  syncLocked: boolean
   color: string
+}
+
+export type EditorAspectRatio = '16:9' | '9:16' | '1:1' | '4:5'
+
+export type EditorSettings = {
+  aspectRatio: EditorAspectRatio
+  background: string
 }
 
 export type TimelineClip = {
@@ -103,6 +112,13 @@ export type TimelineClip = {
   opacity: number
   volume: number
   fit: 'Cover' | 'Contain'
+  scale: number
+  rotation: number
+  positionX: number
+  positionY: number
+  flipX: boolean
+  flipY: boolean
+  blendMode: 'Normal' | 'Multiply' | 'Screen' | 'Overlay' | 'Lighten' | 'Darken'
   text?: string
   linkedShotId?: string
   linkGroupId?: string
@@ -140,6 +156,7 @@ export type Project = {
   timelineTracks: TimelineTrack[]
   timelineClips: TimelineClip[]
   timelineMarkers: TimelineMarker[]
+  editorSettings: EditorSettings
   publish: {
     title: string
     description: string

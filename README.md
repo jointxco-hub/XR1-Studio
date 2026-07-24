@@ -1,6 +1,6 @@
 # X1 Content Studio
 
-Version 0.8 — verified Markdown blueprint import, project deletion, immediate sequence playback, smoother trimming, and lower-latency timeline editing
+Version 0.12 — aligned editor workspace, timeline-mounted professional tools, standard and ripple trimming, and clearer edit controls
 
 A focused, stage-based YouTube production workspace for Joint X: idea, script, visuals, recording, transcript rough cut, DaVinci Resolve handoff, and publishing.
 
@@ -55,12 +55,16 @@ The static build is written to `dist/`.
 - Live caption preview with position and size controls, editable cards, SRT import, and SRT export
 - Persistent V3 titles, V2 B-roll, V1 main story, A2 music, A1 original audio, and CC caption tracks
 - Drag-to-timeline media and shot placement, cross-track moves, snapping, timeline zoom, track locks, visibility, and mute controls
-- Select and blade tools, linked A/V splits and trims, multi-select, grouping, cross-track ripple delete, duplicate, undo/redo, markers, and clip inspector controls
+- Resolve-inspired Selection, Trim, Blade and Hand tools with linked A/V splits and trims, multi-select, grouping, targeted ripple delete, duplicate, undo/redo, markers, and clip inspector controls
 - Generated poster frames, thumbnail strips, audio waveforms, silent hover previews, and a denser professional timeline surface
 - Optimised proxy attachment with instant original/proxy switching in the viewer while original media remains untouched
 - Debounced browser autosave history with up to 20 restorable timeline revisions per project
-- Sequence-aware viewer with layered B-roll/title preview, source-synchronised playback, and transcript captions
-- Exportable v4 edit-plan JSON plus Resolve FCPXML, EDL fallback, sequence manifest, timeline markers, proxy-aware media relink report, shot list, and SRT captions
+- True layered sequence viewer: lower video continues playing beneath B-roll, opacity and transforms reveal the layers below, and transcript captions remain on top
+- Independent audio engine for A1/A2 tracks so the main-story sound continues under visual overlays
+- Non-destructive **Extract audio** action for video clips, with linked A/V movement, splitting, trimming, and unlinking
+- Clip picture controls for scale, X/Y position, rotation, opacity, fit, horizontal/vertical flip, and blend modes
+- Sequence aspect ratios for 16:9, 9:16, 1:1, and 4:5 with a selectable canvas background
+- Exportable v5 edit-plan JSON plus Resolve FCPXML, EDL fallback, sequence manifest, timeline markers, proxy-aware media relink report, shot list, and SRT captions
 - Distraction-free full-script writer with optional `**Section name**` markers and one-click section syncing
 - Direct thumbnail upload, immediate in-app preview, replacement, and removal
 - Multi-project creation, selection, deletion, autosave, and a working View all dashboard
@@ -86,6 +90,36 @@ From the project dashboard, choose **Import blueprint** and upload a `.md` or `.
 The importer accepts YAML front matter, regular Markdown, fenced ChatGPT Markdown blocks, `## Scene 1: Hook`, `## Scene 1 — Hook`, and simple `## Hook` scene headings. It maps project direction, target audience, presenter script, teleprompter delivery notes, primary shots, B-roll, screen actions, on-screen text, edit notes, and basic publishing fields. Start from `YT_STUDIO_BLUEPRINT_TEMPLATE.md`.
 
 Recognised scene headings include `Purpose`, `Presenter Script`, `Teleprompter Script`, `Full Script`, `Primary Shot`, `Screen Actions`, `B-Roll`, `On-Screen Text`, `Recording Notes`, and `Edit Notes`. Paragraphs placed directly beneath a scene heading are also treated as presenter script.
+
+## Layered editor update
+
+- Video layers are composited from V1 upward instead of replacing the whole viewer with only the top clip. This means a scaled, moved, rotated, blended, or partially transparent B-roll clip reveals the video beneath it.
+- Visual video elements are muted in the viewer. Sound is played by the independent A1/A2 audio engine, preventing a B-roll layer from silencing the main-story audio.
+- V1 video drops still create linked original audio automatically. Select any other video clip and use **Extract audio** or press **E** to create a linked, non-destructive audio clip from the same source file.
+- The clip inspector now includes Fit, Blend, Opacity, Scale, Rotation, Position X/Y, Flip Horizontal, Flip Vertical, and Reset. You can also drag the selected active picture directly inside the viewer to reposition it; double-click the picture to reset its transform.
+- Choose 16:9, 9:16, 1:1, or 4:5 from the editor command bar or sequence inspector.
+- Playback uses a sequence clock that continues while individual local layers buffer, then re-synchronises each ready video and audio element without forcing constant micro-seeks.
+
+
+## Timeline layout v0.12
+
+- Moved the primary Select, Trim, Blade and Hand tools directly above the timeline.
+- Separated project utilities from frame-accurate editing controls.
+- Rebalanced the media bin, viewer and inspector columns.
+- Added a responsive timeline tool dock for standard trim, ripple trim, trim-to-playhead, undo, split, audio extraction, lift, ripple delete, grouping and snapping.
+- Improved tool spacing, active-state hierarchy, icon alignment and track control visibility.
+- Updated edit-plan exports to schema version 6.
+
+## Timeline foundation v0.10
+
+- Trim handles and the clip move surface are now physically separate controls. Grabbing the left or right edge cannot fall through into clip movement.
+- Left trimming preserves the clip's timeline right edge while changing source in, timeline start, and duration. Right trimming preserves timeline start while changing source out and duration.
+- Normal trimming follows linked picture/audio only. User-created layout groups no longer cause unrelated B-roll to be trimmed.
+- Every move and trim uses pointer capture, one immutable start snapshot, one undo entry, and Escape-to-cancel.
+- Use **A** or **V** for Selection, **T** for Trim, **B** for Blade, **H** for Hand, and **N** to toggle snapping. Hold **Alt** during move or trim to ignore snapping.
+- Blade mode shows the exact frame before cutting. Hold **Shift** while clicking to blade all targeted, unlocked tracks at that frame.
+- Track headers now include edit targeting and A/V sync-lock controls.
+- Run `npm run test:timeline` to verify the core trim invariants.
 
 ## Playback and timeline update
 

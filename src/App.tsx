@@ -2,12 +2,15 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import JSZip from 'jszip'
 import { defaultTimelineTracks, stageMeta, starterProject } from './data'
 import type { BrollPlacement, EditCut, Project, ResourceAsset, ScriptBlock, Shot, StageId, Take, TimelineClip, TimelineMarker, TimelineTrack, TranscriptLine } from './types'
+import { linkedClipIds as getLinkedClipIds, trimTimelineClips } from './timelineOperations'
 
 type IconName =
   | 'arrow' | 'brief' | 'camera' | 'check' | 'chevron' | 'copy' | 'download'
   | 'edit' | 'expand' | 'eye' | 'file' | 'folder' | 'home' | 'layers' | 'link'
   | 'mic' | 'more' | 'pause' | 'play' | 'plus' | 'record' | 'search' | 'settings'
   | 'spark' | 'trash' | 'upload' | 'video' | 'x'
+  | 'cursor' | 'trimtool' | 'scissors' | 'handtool' | 'undo' | 'redo' | 'magnet'
+  | 'marker' | 'keyboard' | 'history' | 'target' | 'sync' | 'mute' | 'visible' | 'lock'
 
 const paths: Record<IconName, React.ReactNode> = {
   arrow: <><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></>,
@@ -38,6 +41,21 @@ const paths: Record<IconName, React.ReactNode> = {
   upload: <><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M5 20h14"/></>,
   video: <><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></>,
   x: <path d="m6 6 12 12M18 6 6 18"/>,
+  cursor: <><path d="M6 4v16l4.4-4.3 2.7 4.7 2.2-1.3-2.8-4.8H20z"/><path d="M6 4h14" opacity="0"/></>,
+  trimtool: <><path d="M5 7h9"/><path d="M5 17h9"/><path d="M14 4v16"/><path d="M19 6v12"/></>,
+  scissors: <><circle cx="7" cy="17" r="2.4"/><circle cx="7" cy="7" r="2.4"/><path d="M9 8.4 20 4"/><path d="M9 15.6 20 20"/></>,
+  handtool: <><path d="M8 12V6a1.6 1.6 0 1 1 3.2 0v5"/><path d="M11.2 11V5.5a1.6 1.6 0 1 1 3.2 0V11"/><path d="M14.4 11V7a1.6 1.6 0 1 1 3.2 0v7"/><path d="M17.6 12v-2a1.6 1.6 0 1 1 3.2 0v5.2c0 3.1-2 5.8-5.5 5.8h-4c-3.1 0-5.6-2.5-5.6-5.6v-3.7a1.6 1.6 0 1 1 3.2 0V13"/></>,
+  undo: <><path d="M9 7H4v5"/><path d="M4 12c2-4 5.3-6 9.5-6 4.4 0 7.7 2.7 8.5 7"/></>,
+  redo: <><path d="M15 7h5v5"/><path d="M20 12c-2-4-5.3-6-9.5-6-4.4 0-7.7 2.7-8.5 7"/></>,
+  magnet: <><path d="M8 3v7a4 4 0 0 0 8 0V3"/><path d="M8 7H5"/><path d="M19 7h-3"/></>,
+  marker: <><path d="M6 4h10a2 2 0 0 1 2 2v14l-5-3-5 3V6a2 2 0 0 1 2-2Z"/></>,
+  keyboard: <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 14h6M15 14h2"/></>,
+  history: <><path d="M12 8v5l3 2"/><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/></>,
+  target: <><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
+  sync: <><path d="M7 7h10v10"/><path d="m17 7-3 3"/><path d="M7 17h10V7"/><path d="m7 14 3-3"/></>,
+  mute: <><path d="M5 10v4h3l4 4V6L8 10Z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></>,
+  visible: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
+  lock: <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 1 1 8 0v3"/></>,
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -53,9 +71,19 @@ function normaliseProject(input: Partial<Project>, fallbackId: string = makeId()
     editBrollIds: input.editBrollIds ?? [],
     editCuts: input.editCuts ?? [],
     brollPlacements: input.brollPlacements ?? [],
-    timelineTracks: (input.timelineTracks ?? defaultTimelineTracks).map(track => ({...track})),
-    timelineClips: input.timelineClips ?? [],
+    timelineTracks: (input.timelineTracks ?? defaultTimelineTracks).map(track => ({ ...track, targeted: track.targeted ?? true, syncLocked: track.syncLocked ?? true })),
+    timelineClips: (input.timelineClips ?? []).map(clip => ({
+      ...clip,
+      scale: clip.scale ?? 1,
+      rotation: clip.rotation ?? 0,
+      positionX: clip.positionX ?? 0,
+      positionY: clip.positionY ?? 0,
+      flipX: clip.flipX ?? false,
+      flipY: clip.flipY ?? false,
+      blendMode: clip.blendMode ?? 'Normal',
+    })),
     timelineMarkers: input.timelineMarkers ?? [],
+    editorSettings: { ...starterProject.editorSettings, ...(input.editorSettings ?? {}) },
     shots: (input.shots ?? starterProject.shots).map((shot,index) => ({
       shotNumber: `${index+1}A`, shotType:'B-roll', framing:'Medium', movement:'Locked',
       purpose:'', priority:'Support', duration:5, notes:'', order:index, ...shot,
@@ -525,7 +553,7 @@ function StudioBoardStage({ project, setProject, notify, onNext }: { project: Pr
     const asset=project.resources.find(item=>item.id===shot.assetId)
     const start=Math.max(0,...project.timelineClips.map(clip=>clip.timelineStart+clip.duration))
     const marker:TimelineMarker={id:makeId(),time:start,label:`${shot.shotNumber||''} ${shot.description}`.trim(),color:'#c8ff2f',shotId:shot.id}
-    const clip:TimelineClip|undefined=asset?{id:makeId(),trackId:shot.shotType==='A-roll'?'v1':asset.category==='Audio'?'a2':'v2',type:asset.category==='Images'?'image':asset.category==='Audio'?'audio':'video',assetId:asset.id,name:asset.name,timelineStart:start,sourceIn:0,sourceOut:Math.min(asset.duration||shot.duration||5,shot.duration||5),duration:Math.min(asset.duration||shot.duration||5,shot.duration||5),opacity:1,volume:1,fit:'Cover',linkedShotId:shot.id}:undefined
+    const clip:TimelineClip|undefined=asset?{id:makeId(),trackId:shot.shotType==='A-roll'?'v1':asset.category==='Audio'?'a2':'v2',type:asset.category==='Images'?'image':asset.category==='Audio'?'audio':'video',assetId:asset.id,name:asset.name,timelineStart:start,sourceIn:0,sourceOut:Math.min(asset.duration||shot.duration||5,shot.duration||5),duration:Math.min(asset.duration||shot.duration||5,shot.duration||5),opacity:1,volume:1,fit:'Cover',scale:1,rotation:0,positionX:0,positionY:0,flipX:false,flipY:false,blendMode:'Normal',linkedShotId:shot.id}:undefined
     setProject(p=>({...p,timelineMarkers:[...p.timelineMarkers.filter(item=>item.shotId!==shot.id),marker],timelineClips:clip?[...p.timelineClips,clip]:p.timelineClips}))
     notify(asset?'Shot and linked media sent to the timeline':'Shot marker sent to the editor · link media when ready')
   }
@@ -810,16 +838,22 @@ function StandalonePrompter() {
 }
 
 type TimelineRevision={id:string;savedAt:string;label:string;clips:TimelineClip[];tracks:TimelineTrack[];markers:TimelineMarker[]}
+type TimelineTool='select'|'trim'|'blade'|'hand'
+type TimelineInteraction='idle'|'move'|'trim-start'|'trim-end'|'scrub'|'pan'
 const EDIT_FPS=25
 
 function StudioEditorStage({project,setProject,notify,onNext}:{project:Project;setProject:React.Dispatch<React.SetStateAction<Project>>;notify:(s:string)=>void;onNext:()=>void}){
   const [bin,setBin]=useState<'media'|'shots'|'transcript'>('media')
   const [mediaSearch,setMediaSearch]=useState('')
-  const [tool,setTool]=useState<'select'|'blade'>('select')
+  const [tool,setTool]=useState<TimelineTool>('select')
+  const [interaction,setInteraction]=useState<TimelineInteraction>('idle')
+  const [bladePreview,setBladePreview]=useState<{time:number;clipId:string}|null>(null)
   const [zoom,setZoom]=useState(24)
   const [snapping,setSnapping]=useState(true)
+  const [trimMode,setTrimMode]=useState<'standard'|'ripple'>('standard')
   const [snapGuide,setSnapGuide]=useState<number|null>(null)
   const [dragReadout,setDragReadout]=useState<number|null>(null)
+  const [dragDelta,setDragDelta]=useState<number|null>(null)
   const [draggingClipId,setDraggingClipId]=useState<string|null>(null)
   const [trimmingClipId,setTrimmingClipId]=useState<string|null>(null)
   const [mediaState,setMediaState]=useState<'idle'|'loading'|'ready'|'buffering'|'error'>('idle')
@@ -838,257 +872,383 @@ function StudioEditorStage({project,setProject,notify,onNext}:{project:Project;s
   const [revisions,setRevisions]=useState<TimelineRevision[]>([])
   const importInput=useRef<HTMLInputElement>(null)
   const proxyInput=useRef<HTMLInputElement>(null)
-  const player=useRef<HTMLVideoElement>(null)
   const viewerRef=useRef<HTMLElement>(null)
+  const viewerCanvasRef=useRef<HTMLDivElement>(null)
   const timelineScrollRef=useRef<HTMLDivElement>(null)
   const playheadRef=useRef(0)
   const lastFrame=useRef<number|null>(null)
   const revisionTimer=useRef<number|null>(null)
+  const mediaElements=useRef<Map<string,HTMLMediaElement>>(new Map())
+  const cancelGestureRef=useRef<null|(()=>void)>(null)
+
   const tracks=[...project.timelineTracks].sort((a,b)=>a.order-b.order)
   const selectedClip=project.timelineClips.find(clip=>clip.id===selectedClipId)
   const selectedClips=project.timelineClips.filter(clip=>selectedClipIds.includes(clip.id))
   const selectedAsset=project.resources.find(asset=>asset.id===(selectedAssetId||selectedClip?.assetId))
   const assetFor=(clip?:TimelineClip)=>project.resources.find(asset=>asset.id===clip?.assetId)
+  const trackFor=(clip?:TimelineClip)=>project.timelineTracks.find(track=>track.id===clip?.trackId)
+  const sourceFor=(clip:TimelineClip,preferProxy=true)=>{const asset=assetFor(clip);return preferProxy&&proxyMode&&asset?.proxyUrl?asset.proxyUrl:asset?.url}
   const sequenceDuration=project.timelineClips.length?Math.max(0,...project.timelineClips.map(clip=>clip.timelineStart+clip.duration),...project.timelineMarkers.map(marker=>marker.time)):Math.max(0,project.transcript.at(-1)?.end||0,...project.timelineMarkers.map(marker=>marker.time))
   const canvasDuration=Math.max(45,sequenceDuration+10)
   const canvasWidth=Math.max(1200,canvasDuration*zoom)
-  const activeOn=(trackId:string)=>project.timelineTracks.find(track=>track.id===trackId)?.hidden?undefined:project.timelineClips.filter(clip=>clip.trackId===trackId&&playhead>=clip.timelineStart&&playhead<clip.timelineStart+clip.duration).at(-1)
-  const activeVisuals=tracks.filter(track=>track.kind==='video'&&!track.hidden).map(track=>activeOn(track.id)).filter((clip):clip is TimelineClip=>Boolean(clip))
-  const activeDisplay=activeVisuals.find(clip=>clip.type==='video'||clip.type==='image')
-  const activeTitle=activeVisuals.find(clip=>clip.type==='title')
-  const displayAsset=assetFor(activeDisplay)
-  const displaySource=proxyMode&&displayAsset?.proxyUrl?displayAsset.proxyUrl:displayAsset?.url
-  const sourceTime=activeDisplay?activeDisplay.sourceIn+(playhead-activeDisplay.timelineStart):playhead
   const frame=1/EDIT_FPS
+  const activeClipsOn=(trackId:string)=>project.timelineClips.filter(clip=>clip.trackId===trackId&&playhead>=clip.timelineStart&&playhead<clip.timelineStart+clip.duration).sort((a,b)=>a.timelineStart-b.timelineStart||project.timelineClips.indexOf(a)-project.timelineClips.indexOf(b))
+  const activeOn=(trackId:string)=>project.timelineTracks.find(track=>track.id===trackId)?.hidden?undefined:activeClipsOn(trackId).at(-1)
+  const activeVisuals=tracks.filter(track=>track.kind==='video'&&!track.hidden).map(track=>activeOn(track.id)).filter((clip):clip is TimelineClip=>Boolean(clip))
+  const visualLayers=[...activeVisuals].filter(clip=>clip.type==='video'||clip.type==='image').reverse()
+  const titleLayers=[...activeVisuals].filter(clip=>clip.type==='title').reverse()
+  const activeDisplay=activeVisuals.find(clip=>clip.type==='video'||clip.type==='image')
+  const displayAsset=assetFor(activeDisplay)
+  const sourceTime=activeDisplay?activeDisplay.sourceIn+(playhead-activeDisplay.timelineStart):playhead
+  const explicitAudio=tracks.filter(track=>track.kind==='audio'&&!track.muted&&!track.hidden).flatMap(track=>activeClipsOn(track.id)).filter(clip=>clip.type==='audio'&&Boolean(sourceFor(clip)))
+  const implicitMainAudio=activeVisuals.filter(clip=>clip.type==='video'&&clip.trackId==='v1'&&!trackFor(clip)?.muted&&Boolean(sourceFor(clip,false))&&!project.timelineClips.some(item=>item.type==='audio'&&Boolean(clip.linkGroupId)&&item.linkGroupId===clip.linkGroupId))
+  const audioLayers=[...explicitAudio,...implicitMainAudio]
   const activeCaption=project.timelineClips.find(clip=>clip.trackId==='cc'&&playhead>=clip.timelineStart&&playhead<clip.timelineStart+clip.duration)?.text||project.transcript.find(line=>line.included&&sourceTime>=line.start&&sourceTime<line.end)?.text
+  const aspectRatio=project.editorSettings.aspectRatio
+  const aspectCss:Record<Project['editorSettings']['aspectRatio'],string>={'16:9':'16 / 9','9:16':'9 / 16','1:1':'1 / 1','4:5':'4 / 5'}
+  const portraitAspect=aspectRatio==='9:16'||aspectRatio==='4:5'||aspectRatio==='1:1'
+  const toolHint:Record<TimelineTool,string>={select:'Drag the clip centre to move · drag either edge to trim',trim:`Use the highlighted edges for precise ${trimMode==='ripple'?'ripple ':'source '}trimming`,blade:'Click a clip to cut · hold Shift to cut targeted tracks',hand:'Drag anywhere on the timeline to navigate'}
+
   const commit=(next:TimelineClip[])=>{setUndoStack(stack=>[...stack.slice(-49),project.timelineClips.map(clip=>({...clip}))]);setRedoStack([]);setProject(p=>({...p,timelineClips:next}))}
   const updateClip=(id:string,update:Partial<TimelineClip>,history=true)=>{const next=project.timelineClips.map(clip=>clip.id===id?{...clip,...update}:clip);if(history)commit(next);else setProject(p=>({...p,timelineClips:next}))}
+  const updateEditorSettings=(update:Partial<Project['editorSettings']>)=>setProject(p=>({...p,editorSettings:{...p.editorSettings,...update}}))
   const undo=()=>{const previous=undoStack.at(-1);if(!previous)return;setRedoStack(stack=>[...stack,project.timelineClips.map(clip=>({...clip}))]);setUndoStack(stack=>stack.slice(0,-1));setProject(p=>({...p,timelineClips:previous}))}
   const redo=()=>{const next=redoStack.at(-1);if(!next)return;setUndoStack(stack=>[...stack,project.timelineClips.map(clip=>({...clip}))]);setRedoStack(stack=>stack.slice(0,-1));setProject(p=>({...p,timelineClips:next}))}
   const trackAccepts=(track:TimelineTrack,type:TimelineClip['type'])=>track.kind==='video'?['video','image','title'].includes(type):track.kind==='audio'?type==='audio':type==='caption'
   const frameSnap=(time:number)=>Math.max(0,Math.round(time*EDIT_FPS)/EDIT_FPS)
+  const signedFrameSnap=(time:number)=>Math.round(time*EDIT_FPS)/EDIT_FPS
   const snapPoints=(excludeIds=new Set<string>())=>[0,playhead,...project.timelineClips.filter(clip=>!excludeIds.has(clip.id)).flatMap(clip=>[clip.timelineStart,clip.timelineStart+clip.duration]),...project.timelineMarkers.map(marker=>marker.time)]
-  const snapResult=(time:number,excludeIds=new Set<string>())=>{const framed=frameSnap(time);if(!snapping)return{time:framed,guide:null as number|null};const points=snapPoints(excludeIds),closest=points.reduce((best,point)=>Math.abs(point-framed)<Math.abs(best-framed)?point:best,points[0]||0),hit=Math.abs(closest-framed)<=Math.max(frame,12/zoom);return{time:frameSnap(hit?closest:framed),guide:hit?closest:null}}
-  const snapMoveResult=(start:number,duration:number,excludeIds=new Set<string>())=>{
-    const framed=frameSnap(Math.max(0,start));if(!snapping)return{time:framed,guide:null as number|null}
+  const snapResult=(time:number,excludeIds=new Set<string>(),ignore=false)=>{const framed=frameSnap(time);if(!snapping||ignore)return{time:framed,guide:null as number|null};const points=snapPoints(excludeIds),closest=points.reduce((best,point)=>Math.abs(point-framed)<Math.abs(best-framed)?point:best,points[0]||0),hit=Math.abs(closest-framed)<=Math.max(frame,12/zoom);return{time:frameSnap(hit?closest:framed),guide:hit?closest:null}}
+  const snapMoveResult=(start:number,duration:number,excludeIds=new Set<string>(),ignore=false)=>{
+    const framed=frameSnap(Math.max(0,start));if(!snapping||ignore)return{time:framed,guide:null as number|null}
     const threshold=Math.max(frame,12/zoom),points=snapPoints(excludeIds),edges=[{time:framed,offset:0},{time:framed+duration,offset:duration}],candidates=edges.flatMap(edge=>points.map(point=>({distance:Math.abs(point-edge.time),start:point-edge.offset,guide:point}))).filter(item=>item.start>=0).sort((a,b)=>a.distance-b.distance),best=candidates[0]
     return best&&best.distance<=threshold?{time:frameSnap(best.start),guide:best.guide}:{time:framed,guide:null as number|null}
   }
   const snapped=(time:number,excludeId?:string)=>snapResult(time,new Set(excludeId?[excludeId]:[])).time
   const selectClip=(id:string,append=false)=>{setSelectedClipId(id);setSelectedClipIds(current=>append?(current.includes(id)?current.filter(item=>item!==id):[...current,id]):[id])}
-  const expandedSelection=(initial?:Iterable<string>)=>{const seed=new Set(initial??(selectedClipIds.length?selectedClipIds:selectedClipId?[selectedClipId]:[]));let changed=true;while(changed){changed=false;project.timelineClips.forEach(clip=>{if(seed.has(clip.id))return;const related=project.timelineClips.some(item=>seed.has(item.id)&&Boolean(item.linkGroupId&&item.linkGroupId===clip.linkGroupId||item.groupId&&item.groupId===clip.groupId));if(related){seed.add(clip.id);changed=true}})}return seed}
-  const createClip=(asset:ResourceAsset,trackId:string,time:number,shotId?:string):TimelineClip=>{const type:TimelineClip['type']=asset.category==='Images'?'image':asset.category==='Audio'?'audio':'video',duration=Math.max(.5,Math.min(asset.duration||8,asset.category==='Images'?5:asset.duration||8));return{id:makeId(),trackId,type,assetId:asset.id,name:asset.name,timelineStart:snapped(time),sourceIn:0,sourceOut:duration,duration,opacity:1,volume:1,fit:'Cover',linkedShotId:shotId}}
-  const addTitle=()=>{const clip:TimelineClip={id:makeId(),trackId:'v3',type:'title',name:'Title card',timelineStart:snapped(playhead),sourceIn:0,sourceOut:4,duration:4,opacity:1,volume:1,fit:'Contain',text:'TYPE YOUR TITLE'};commit([...project.timelineClips,clip]);selectClip(clip.id)}
-  const splitClip=(clip:TimelineClip,time=playhead)=>{const targetIds=new Set([clip.id,...project.timelineClips.filter(item=>clip.linkGroupId&&item.linkGroupId===clip.linkGroupId).map(item=>item.id)]),rightLinks=new Map<string,string>(),newIds:string[]=[];let changed=false;const next=project.timelineClips.flatMap(item=>{if(!targetIds.has(item.id))return[item];const offset=time-item.timelineStart;if(offset<frame||offset>item.duration-frame)return[item];changed=true;const newLink=item.linkGroupId?(rightLinks.get(item.linkGroupId)||(()=>{const id=makeId();rightLinks.set(item.linkGroupId!,id);return id})()):undefined,left={...item,duration:frameSnap(offset),sourceOut:frameSnap(item.sourceIn+offset)},right={...item,id:makeId(),linkGroupId:newLink,timelineStart:frameSnap(time),sourceIn:frameSnap(item.sourceIn+offset),duration:frameSnap(item.duration-offset),sourceOut:item.sourceOut};newIds.push(right.id);return[left,right]});if(!changed){notify('Move the playhead at least one frame inside the clip');return}commit(next);setSelectedClipId(newIds[0]||null);setSelectedClipIds(newIds);notify(targetIds.size>1?'Linked video and audio split together':'Clip split at the playhead')}
+  const expandedSelection=(initial?:Iterable<string>)=>{const seed=new Set(initial??(selectedClipIds.length?selectedClipIds:selectedClipId?[selectedClipId]:[]));let changed=true;while(changed){changed=false;project.timelineClips.forEach(clip=>{if(seed.has(clip.id))return;const related=project.timelineClips.some(item=>{if(!seed.has(item.id))return false;const grouped=Boolean(item.groupId&&item.groupId===clip.groupId),linked=Boolean(item.linkGroupId&&item.linkGroupId===clip.linkGroupId&&trackFor(item)?.syncLocked!==false&&trackFor(clip)?.syncLocked!==false);return grouped||linked});if(related){seed.add(clip.id);changed=true}})}return seed}
+  const linkedSelection=(clip:TimelineClip)=>{const primaryTrack=trackFor(clip);if(primaryTrack?.syncLocked===false)return new Set([clip.id]);return new Set([...getLinkedClipIds(project.timelineClips,clip)].filter(id=>{const item=project.timelineClips.find(candidate=>candidate.id===id);return item&&trackFor(item)?.syncLocked!==false}))}
+  const defaultClipTransform=()=>({scale:1,rotation:0,positionX:0,positionY:0,flipX:false,flipY:false,blendMode:'Normal' as const})
+  const createClip=(asset:ResourceAsset,trackId:string,time:number,shotId?:string):TimelineClip=>{const type:TimelineClip['type']=asset.category==='Images'?'image':asset.category==='Audio'?'audio':'video',duration=Math.max(.5,Math.min(asset.duration||8,asset.category==='Images'?5:asset.duration||8));return{id:makeId(),trackId,type,assetId:asset.id,name:asset.name,timelineStart:snapped(time),sourceIn:0,sourceOut:duration,duration,opacity:1,volume:1,fit:'Cover',...defaultClipTransform(),linkedShotId:shotId}}
+  const addTitle=()=>{const clip:TimelineClip={id:makeId(),trackId:'v3',type:'title',name:'Title card',timelineStart:snapped(playhead),sourceIn:0,sourceOut:4,duration:4,opacity:1,volume:1,fit:'Contain',...defaultClipTransform(),text:'TYPE YOUR TITLE'};commit([...project.timelineClips,clip]);selectClip(clip.id)}
+  const splitClip=(clip:TimelineClip,time=playhead)=>{const targetIds=linkedSelection(clip),rightLinks=new Map<string,string>(),newIds:string[]=[];let changed=false;const next=project.timelineClips.flatMap(item=>{if(!targetIds.has(item.id))return[item];const offset=time-item.timelineStart;if(offset<frame||offset>item.duration-frame)return[item];changed=true;const newLink=item.linkGroupId?(rightLinks.get(item.linkGroupId)||(()=>{const id=makeId();rightLinks.set(item.linkGroupId!,id);return id})()):undefined,left={...item,duration:frameSnap(offset),sourceOut:frameSnap(item.sourceIn+offset)},right={...item,id:makeId(),linkGroupId:newLink,timelineStart:frameSnap(time),sourceIn:frameSnap(item.sourceIn+offset),duration:frameSnap(item.duration-offset),sourceOut:item.sourceOut};newIds.push(right.id);return[left,right]});if(!changed){notify('Move the playhead at least one frame inside the clip');return}commit(next);setSelectedClipId(newIds[0]||null);setSelectedClipIds(newIds);notify(targetIds.size>1?'Linked video and audio split together':'Clip split at the playhead')}
+  const bladeAt=(primary:TimelineClip,time:number,allTargeted=false)=>{
+    if(!allTargeted){splitClip(primary,time);return}
+    const targetedTracks=new Set(project.timelineTracks.filter(track=>track.targeted&&!track.locked).map(track=>track.id))
+    const targetIds=new Set(project.timelineClips.filter(item=>targetedTracks.has(item.trackId)&&time>item.timelineStart+frame/2&&time<item.timelineStart+item.duration-frame/2).map(item=>item.id))
+    if(!targetIds.size){notify('No targeted clips cross this frame');return}
+    project.timelineClips.forEach(item=>{if(targetIds.has(item.id)&&item.linkGroupId&&trackFor(item)?.syncLocked!==false){project.timelineClips.forEach(linked=>{if(linked.linkGroupId===item.linkGroupId&&trackFor(linked)?.syncLocked!==false)targetIds.add(linked.id)})}})
+    const rightLinks=new Map<string,string>(),newIds:string[]=[]
+    const next=project.timelineClips.flatMap(item=>{if(!targetIds.has(item.id))return[item];const offset=time-item.timelineStart;if(offset<frame||offset>item.duration-frame)return[item];const newLink=item.linkGroupId?(rightLinks.get(item.linkGroupId)||(()=>{const id=makeId();rightLinks.set(item.linkGroupId!,id);return id})()):undefined,left={...item,duration:frameSnap(offset),sourceOut:frameSnap(item.sourceIn+offset)},right={...item,id:makeId(),linkGroupId:newLink,timelineStart:frameSnap(time),sourceIn:frameSnap(item.sourceIn+offset),duration:frameSnap(item.duration-offset),sourceOut:item.sourceOut};newIds.push(right.id);return[left,right]})
+    commit(next);setSelectedClipId(newIds[0]||null);setSelectedClipIds(newIds);notify(`Blade cut ${newIds.length} targeted clip${newIds.length===1?'':'s'} at ${formatTimecode(time)}`)
+  }
   const lift=()=>{const ids=expandedSelection();if(!ids.size)return;commit(project.timelineClips.filter(clip=>!ids.has(clip.id)));setSelectedClipId(null);setSelectedClipIds([]);notify(`${ids.size} clip${ids.size===1?'':'s'} lifted · the gap stays`)}
-  const rippleDelete=()=>{const ids=expandedSelection();const removing=project.timelineClips.filter(clip=>ids.has(clip.id));if(!removing.length)return;const start=Math.min(...removing.map(clip=>clip.timelineStart)),end=Math.max(...removing.map(clip=>clip.timelineStart+clip.duration)),gap=frameSnap(end-start),affectedTracks=new Set(removing.map(clip=>clip.trackId)),locked=new Set(project.timelineTracks.filter(track=>track.locked).map(track=>track.id));commit(project.timelineClips.filter(clip=>!ids.has(clip.id)).map(clip=>clip.timelineStart>=end&&!locked.has(clip.trackId)&&(rippleAll||affectedTracks.has(clip.trackId))?{...clip,timelineStart:frameSnap(Math.max(start,clip.timelineStart-gap))}:clip));setSelectedClipId(null);setSelectedClipIds([]);notify(`Ripple closed ${formatPrecise(gap)} ${rippleAll?'across unlocked tracks':'on selected tracks'}`)}
+  const rippleDelete=()=>{const ids=expandedSelection();const removing=project.timelineClips.filter(clip=>ids.has(clip.id));if(!removing.length)return;const start=Math.min(...removing.map(clip=>clip.timelineStart)),end=Math.max(...removing.map(clip=>clip.timelineStart+clip.duration)),gap=frameSnap(end-start),affectedTracks=new Set(removing.map(clip=>clip.trackId)),targetedTracks=new Set(project.timelineTracks.filter(track=>track.targeted).map(track=>track.id)),locked=new Set(project.timelineTracks.filter(track=>track.locked).map(track=>track.id));commit(project.timelineClips.filter(clip=>!ids.has(clip.id)).map(clip=>clip.timelineStart>=end&&!locked.has(clip.trackId)&&(rippleAll||targetedTracks.has(clip.trackId)||affectedTracks.has(clip.trackId))?{...clip,timelineStart:frameSnap(Math.max(start,clip.timelineStart-gap))}:clip));setSelectedClipId(null);setSelectedClipIds([]);notify(`Ripple closed ${formatPrecise(gap)} ${rippleAll?'across unlocked tracks':'on targeted tracks'}`)}
   const duplicate=()=>{const ids=expandedSelection(),items=project.timelineClips.filter(clip=>ids.has(clip.id));if(!items.length)return;const start=Math.min(...items.map(item=>item.timelineStart)),end=Math.max(...items.map(item=>item.timelineStart+item.duration)),offset=end-start+frame*2,linkMap=new Map<string,string>(),groupMap=new Map<string,string>();const copies=items.map(item=>{const linkGroupId=item.linkGroupId?(linkMap.get(item.linkGroupId)||(()=>{const id=makeId();linkMap.set(item.linkGroupId!,id);return id})()):undefined,groupId=item.groupId?(groupMap.get(item.groupId)||(()=>{const id=makeId();groupMap.set(item.groupId!,id);return id})()):undefined;return{...item,id:makeId(),name:`${item.name} copy`,timelineStart:frameSnap(item.timelineStart+offset),linkGroupId,groupId}});commit([...project.timelineClips,...copies]);setSelectedClipId(copies[0].id);setSelectedClipIds(copies.map(copy=>copy.id));notify(`${copies.length} clip${copies.length===1?'':'s'} duplicated`)}
   const groupSelection=()=>{if(selectedClipIds.length<2){notify('Select two or more clips with Ctrl / Cmd click');return}const groupId=makeId();commit(project.timelineClips.map(clip=>selectedClipIds.includes(clip.id)?{...clip,groupId}:clip));notify(`${selectedClipIds.length} clips grouped`)}
   const ungroupSelection=()=>{const ids=expandedSelection();if(!ids.size)return;commit(project.timelineClips.map(clip=>ids.has(clip.id)?{...clip,groupId:undefined}:clip));notify('Selected clips ungrouped')}
   const unlinkSelection=()=>{const ids=expandedSelection();if(!ids.size)return;commit(project.timelineClips.map(clip=>ids.has(clip.id)?{...clip,linkGroupId:undefined}:clip));notify('Audio and video unlinked')}
-  const beginMove=(event:React.PointerEvent<HTMLButtonElement>,clip:TimelineClip)=>{
+  const extractAudio=(clip=selectedClip)=>{
+    if(!clip||clip.type!=='video'||!clip.assetId){notify('Select a video clip first');return}
+    const asset=assetFor(clip);if(!asset){notify('The source media is not linked');return}
+    const existing=project.timelineClips.find(item=>item.type==='audio'&&((clip.linkGroupId&&item.linkGroupId===clip.linkGroupId)||(item.assetId===clip.assetId&&Math.abs(item.timelineStart-clip.timelineStart)<frame&&Math.abs(item.sourceIn-clip.sourceIn)<frame)))
+    if(existing){selectClip(existing.id);notify('This video already has an extracted audio clip');return}
+    const preferred=clip.trackId==='v1'?'a1':'a2',target=project.timelineTracks.find(track=>track.id===preferred&&!track.locked)||project.timelineTracks.find(track=>track.kind==='audio'&&!track.locked)
+    if(!target){notify('Unlock an audio track before extracting audio');return}
+    const linkGroupId=clip.linkGroupId||makeId()
+    const audio:TimelineClip={...clip,id:makeId(),trackId:target.id,type:'audio',name:`${asset.name} · extracted audio`,opacity:1,volume:1,fit:'Cover',...defaultClipTransform(),linkGroupId}
+    const next=project.timelineClips.map(item=>item.id===clip.id?{...item,linkGroupId}:item)
+    commit([...next,audio]);setSelectedClipId(clip.id);setSelectedClipIds([clip.id]);notify(`Audio extracted non-destructively to ${target.label}`)
+  }
+  const resetTransform=(clip:TimelineClip)=>updateClip(clip.id,{...defaultClipTransform(),opacity:1,fit:'Cover'})
+
+  const shiftFollowingClips=(clips:TimelineClip[], trackIds:Set<string>, fromTime:number, delta:number, preserveIds=new Set<string>())=>{
+    if(!delta) return clips
+    return clips.map(item=>!trackIds.has(item.trackId)||preserveIds.has(item.id)||item.timelineStart<fromTime?item:{...item,timelineStart:frameSnap(Math.max(0,item.timelineStart+delta))})
+  }
+  const applyTrimAtPlayhead=(edge:'start'|'end')=>{
+    const clip=selectedClip
+    if(!clip){notify('Select a clip first');return}
+    const clipEnd=clip.timelineStart+clip.duration
+    if(playhead<=clip.timelineStart+frame || playhead>=clipEnd-frame){notify('Move the playhead inside the clip before trimming');return}
+    const linkedIds=linkedSelection(clip)
+    const sourceDurations=new Map(project.timelineClips.map(item=>{const asset=assetFor(item),duration=item.type==='image'||item.type==='title'?21600:(asset?.duration||item.sourceOut);return[item.id,duration] as const}))
+    const delta=edge==='start'?frameSnap(playhead-clip.timelineStart):frameSnap(playhead-clipEnd)
+    const trimmed=trimTimelineClips(project.timelineClips,{clipId:clip.id,linkedClipIds:linkedIds,edge,delta,frame,sourceDurations})
+    const before=project.timelineClips.find(item=>item.id===clip.id)
+    const after=trimmed.find(item=>item.id===clip.id)
+    let next=trimmed
+    if(trimMode==='ripple' && before && after){
+      const endDelta=frameSnap((after.timelineStart+after.duration)-(before.timelineStart+before.duration))
+      if(endDelta!==0){
+        const targetedTracks=new Set(project.timelineTracks.filter(track=>track.targeted && !track.locked).map(track=>track.id))
+        next=shiftFollowingClips(trimmed,targetedTracks,frameSnap(before.timelineStart+before.duration),endDelta,linkedIds)
+      }
+    }
+    commit(next)
+    setSelectedClipId(clip.id)
+    setSelectedClipIds(Array.from(linkedIds))
+    notify(`${edge==='start'?'Trim start':'Trim end'} ${trimMode==='ripple'?'with ripple ':' '}to playhead`)
+  }
+
+  const beginMove=(event:React.PointerEvent<HTMLElement>,clip:TimelineClip)=>{
     if(tool!=='select'||project.timelineTracks.find(track=>track.id===clip.trackId)?.locked||event.button!==0)return
-    if((event.target as HTMLElement).closest('.trim'))return
     event.preventDefault();event.stopPropagation()
+    const pointerTarget=event.currentTarget,pointerId=event.pointerId
+    pointerTarget.setPointerCapture?.(pointerId)
     const append=event.shiftKey||event.ctrlKey||event.metaKey
     const seed=append?new Set([...selectedClipIds,clip.id]):new Set([clip.id])
     const ids=selectedClipIds.includes(clip.id)?expandedSelection():expandedSelection(seed)
     setSelectedClipId(clip.id);setSelectedClipIds(Array.from(ids))
-    const snapshot=project.timelineClips.map(item=>({...item})),originMap=new Map(snapshot.map(item=>[item.id,item])),originX=event.clientX,originScroll=timelineScrollRef.current?.scrollLeft||0
+    const snapshot=project.timelineClips.map(item=>({...item})),originMap=new Map(snapshot.map(item=>[item.id,item])),originX=event.clientX,originY=event.clientY,originScroll=timelineScrollRef.current?.scrollLeft||0
     const selectedOrigins=snapshot.filter(item=>ids.has(item.id)),groupStart=Math.min(...selectedOrigins.map(item=>item.timelineStart)),groupEnd=Math.max(...selectedOrigins.map(item=>item.timelineStart+item.duration)),groupDuration=groupEnd-groupStart
-    let latestX=originX,raf=0,targetTrack=clip.trackId,dragStarted=false,historySaved=false
+    let latestX=originX,latestY=originY,ignoreSnap=event.altKey,raf=0,targetTrack=clip.trackId,dragStarted=false,historySaved=false,finished=false
     const ensureHistory=()=>{if(historySaved)return;historySaved=true;setUndoStack(stack=>[...stack.slice(-49),snapshot]);setRedoStack([])}
     const autoScroll=(clientX:number)=>{const scroll=timelineScrollRef.current;if(!scroll)return;const rect=scroll.getBoundingClientRect(),edge=72,maxStep=20;if(clientX<rect.left+edge)scroll.scrollLeft=Math.max(0,scroll.scrollLeft-Math.min(maxStep,(rect.left+edge-clientX)*.35));else if(clientX>rect.right-edge)scroll.scrollLeft+=Math.min(maxStep,(clientX-(rect.right-edge))*.35)}
-    const render=()=>{
-      raf=0;if(!dragStarted)return
-      const scrollDelta=(timelineScrollRef.current?.scrollLeft||0)-originScroll,rawGroupStart=groupStart+(latestX-originX+scrollDelta)/zoom,result=snapMoveResult(rawGroupStart,groupDuration,ids),delta=result.time-groupStart
-      setSnapGuide(result.guide);setDragReadout(frameSnap(clip.timelineStart+delta))
-      setProject(p=>({...p,timelineClips:p.timelineClips.map(item=>{const origin=originMap.get(item.id);return ids.has(item.id)&&origin?{...item,trackId:item.id===clip.id?targetTrack:origin.trackId,timelineStart:frameSnap(Math.max(0,origin.timelineStart+delta))}:item})}))
-    }
-    const move=(pointer:PointerEvent)=>{
-      latestX=pointer.clientX;autoScroll(pointer.clientX)
-      const lane=document.elementFromPoint(pointer.clientX,pointer.clientY)?.closest<HTMLElement>('[data-track-id]')
-      if(lane){const candidate=project.timelineTracks.find(track=>track.id===lane.dataset.trackId);if(candidate&&!candidate.locked&&trackAccepts(candidate,clip.type))targetTrack=candidate.id}
-      const travelled=Math.hypot(pointer.clientX-originX,pointer.clientY-event.clientY)
-      if(!dragStarted&&travelled>=3){dragStarted=true;ensureHistory();suppressTimelineClick.current=true;setDraggingClipId(clip.id);document.body.classList.add('timeline-pointer-active')}
-      if(dragStarted&&!raf)raf=requestAnimationFrame(render)
-    }
-    const finish=()=>{
-      if(raf){cancelAnimationFrame(raf);render()}
-      removeEventListener('pointermove',move);removeEventListener('pointerup',finish);removeEventListener('pointercancel',finish)
-      setSnapGuide(null);setDragReadout(null);setDraggingClipId(null);document.body.classList.remove('timeline-pointer-active')
-      if(dragStarted)window.setTimeout(()=>{suppressTimelineClick.current=false},0)
-    }
-    addEventListener('pointermove',move);addEventListener('pointerup',finish,{once:true});addEventListener('pointercancel',finish,{once:true})
+    const render=()=>{raf=0;if(!dragStarted)return;const scrollDelta=(timelineScrollRef.current?.scrollLeft||0)-originScroll,rawGroupStart=groupStart+(latestX-originX+scrollDelta)/zoom,result=snapMoveResult(rawGroupStart,groupDuration,ids,ignoreSnap),delta=result.time-groupStart;setSnapGuide(result.guide);setDragReadout(frameSnap(clip.timelineStart+delta));setDragDelta(signedFrameSnap(delta));setProject(p=>({...p,timelineClips:p.timelineClips.map(item=>{const origin=originMap.get(item.id);return ids.has(item.id)&&origin?{...item,trackId:item.id===clip.id?targetTrack:origin.trackId,timelineStart:frameSnap(Math.max(0,origin.timelineStart+delta))}:item})}))}
+    const move=(pointer:PointerEvent)=>{latestX=pointer.clientX;latestY=pointer.clientY;ignoreSnap=pointer.altKey;autoScroll(pointer.clientX);const lane=document.elementFromPoint(pointer.clientX,pointer.clientY)?.closest<HTMLElement>('[data-track-id]');if(lane){const candidate=project.timelineTracks.find(track=>track.id===lane.dataset.trackId);if(candidate&&!candidate.locked&&trackAccepts(candidate,clip.type))targetTrack=candidate.id}const travelled=Math.hypot(latestX-originX,latestY-originY);if(!dragStarted&&travelled>=3){dragStarted=true;ensureHistory();suppressTimelineClick.current=true;setDraggingClipId(clip.id);setInteraction('move');document.body.classList.add('timeline-moving')}if(dragStarted&&!raf)raf=requestAnimationFrame(render)}
+    const cleanup=()=>{pointerTarget.removeEventListener('pointermove',move);pointerTarget.removeEventListener('pointerup',up);pointerTarget.removeEventListener('pointercancel',cancel);try{pointerTarget.releasePointerCapture?.(pointerId)}catch{/* pointer already released */}setSnapGuide(null);setDragReadout(null);setDragDelta(null);setDraggingClipId(null);setInteraction('idle');document.body.classList.remove('timeline-moving');cancelGestureRef.current=null;if(dragStarted)window.setTimeout(()=>{suppressTimelineClick.current=false},0)}
+    const finish=(restore=false)=>{if(finished)return;finished=true;if(raf){cancelAnimationFrame(raf);render()}if(restore&&dragStarted){setProject(p=>({...p,timelineClips:snapshot}));if(historySaved)setUndoStack(stack=>stack.slice(0,-1))}cleanup()}
+    const up=()=>finish(false),cancel=()=>finish(true)
+    cancelGestureRef.current=cancel
+    pointerTarget.addEventListener('pointermove',move);pointerTarget.addEventListener('pointerup',up,{once:true});pointerTarget.addEventListener('pointercancel',cancel,{once:true})
   }
-  const handleDrop=(event:React.DragEvent<HTMLDivElement>,track:TimelineTrack)=>{event.preventDefault();if(track.locked){notify('Unlock this track before editing it');return}const rect=event.currentTarget.getBoundingClientRect(),time=snapped((event.clientX-rect.left)/zoom);const clipId=event.dataTransfer.getData('application/x-x1-clip'),assetId=event.dataTransfer.getData('application/x-x1-asset'),shotId=event.dataTransfer.getData('application/x-x1-shot')
+  const handleDrop=(event:React.DragEvent<HTMLDivElement>,track:TimelineTrack)=>{
+    event.preventDefault();if(track.locked){notify('Unlock this track before editing it');return}
+    const rect=event.currentTarget.getBoundingClientRect(),time=snapped((event.clientX-rect.left)/zoom),clipId=event.dataTransfer.getData('application/x-x1-clip'),assetId=event.dataTransfer.getData('application/x-x1-asset'),shotId=event.dataTransfer.getData('application/x-x1-shot')
     if(clipId){const clip=project.timelineClips.find(item=>item.id===clipId);if(!clip||!trackAccepts(track,clip.type)){notify('That clip type cannot go on this track');return}const ids=selectedClipIds.includes(clipId)?expandedSelection():new Set([clipId,...project.timelineClips.filter(item=>clip.linkGroupId&&item.linkGroupId===clip.linkGroupId).map(item=>item.id)]),delta=time-clip.timelineStart,locked=new Set(project.timelineTracks.filter(item=>item.locked).map(item=>item.id));commit(project.timelineClips.map(item=>ids.has(item.id)&&!locked.has(item.trackId)?{...item,trackId:item.id===clipId?track.id:item.trackId,timelineStart:snapped(item.timelineStart+delta,item.id)}:item));setSelectedClipId(clipId);setSelectedClipIds(Array.from(ids));return}
-    const shot=shotId?project.shots.find(item=>item.id===shotId):undefined,asset=project.resources.find(item=>item.id===(assetId||shot?.assetId));if(!asset){if(shot){const marker={id:makeId(),time,label:shot.description,color:'#c8ff2f',shotId:shot.id};setProject(p=>({...p,timelineMarkers:[...p.timelineMarkers,marker]}));notify('Shot marker placed · link media when it is ready')}return}const candidate=createClip(asset,track.id,time,shot?.id);if(!trackAccepts(track,candidate.type)){notify(`Drop ${candidate.type} media onto a compatible track`);return}const next=[...project.timelineClips,candidate],added=[candidate.id];if(track.id==='v1'&&candidate.type==='video'){const linkGroupId=makeId();candidate.linkGroupId=linkGroupId;const audio={...candidate,id:makeId(),trackId:'a1',type:'audio' as const,name:`${candidate.name} · linked audio`,linkGroupId};next.push(audio);added.push(audio.id)}commit(next);setSelectedClipId(candidate.id);setSelectedClipIds(added);notify(`${asset.name} added at ${formatPrecise(candidate.timelineStart)}${added.length>1?' · A/V linked':''}`)}
-  const beginTrim=(event:React.PointerEvent,clip:TimelineClip,edge:'start'|'end')=>{
-    event.preventDefault();event.stopPropagation()
-    if(project.timelineTracks.find(track=>track.id===clip.trackId)?.locked)return
+    const shot=shotId?project.shots.find(item=>item.id===shotId):undefined,asset=project.resources.find(item=>item.id===(assetId||shot?.assetId))
+    if(!asset){if(shot){const marker={id:makeId(),time,label:shot.description,color:'#c8ff2f',shotId:shot.id};setProject(p=>({...p,timelineMarkers:[...p.timelineMarkers,marker]}));notify('Shot marker placed · link media when it is ready')}return}
+    const candidate=createClip(asset,track.id,time,shot?.id);if(!trackAccepts(track,candidate.type)){notify(`Drop ${candidate.type} media onto a compatible track`);return}
+    const next=[...project.timelineClips,candidate],added=[candidate.id]
+    if(track.id==='v1'&&candidate.type==='video'){const linkGroupId=makeId();candidate.linkGroupId=linkGroupId;const audio={...candidate,id:makeId(),trackId:'a1',type:'audio' as const,name:`${candidate.name} · linked audio`,linkGroupId};next.push(audio);added.push(audio.id)}
+    commit(next);setSelectedClipId(candidate.id);setSelectedClipIds(added);notify(`${asset.name} added at ${formatPrecise(candidate.timelineStart)}${added.length>1?' · A/V linked':''}`)
+  }
+  const beginTrim=(event:React.PointerEvent<HTMLElement>,clip:TimelineClip,edge:'start'|'end')=>{
+    event.preventDefault();event.stopPropagation();if(project.timelineTracks.find(track=>track.id===clip.trackId)?.locked||event.button!==0)return
+    const pointerTarget=event.currentTarget,pointerId=event.pointerId
+    pointerTarget.setPointerCapture?.(pointerId)
     const originX=event.clientX,originY=event.clientY,originScroll=timelineScrollRef.current?.scrollLeft||0,snapshot=project.timelineClips.map(item=>({...item})),originMap=new Map(snapshot.map(item=>[item.id,item]))
-    const ids=expandedSelection(new Set([clip.id,...project.timelineClips.filter(item=>clip.linkGroupId&&item.linkGroupId===clip.linkGroupId).map(item=>item.id)]))
-    setSelectedClipId(clip.id);setSelectedClipIds(Array.from(ids))
-    let latestX=originX,raf=0,trimStarted=false,historySaved=false
+    const ids=linkedSelection(clip);setSelectedClipId(clip.id);setSelectedClipIds(Array.from(ids))
+    const sourceDurations=new Map(snapshot.map(item=>{const asset=assetFor(item),duration=item.type==='image'||item.type==='title'?21600:(asset?.duration||item.sourceOut);return[item.id,duration] as const}))
+    let latestX=originX,latestY=originY,ignoreSnap=event.altKey,raf=0,trimStarted=false,historySaved=false,finished=false
     const ensureHistory=()=>{if(historySaved)return;historySaved=true;setUndoStack(stack=>[...stack.slice(-49),snapshot]);setRedoStack([])}
     const autoScroll=(clientX:number)=>{const scroll=timelineScrollRef.current;if(!scroll)return;const rect=scroll.getBoundingClientRect(),edgeSize=72,maxStep=20;if(clientX<rect.left+edgeSize)scroll.scrollLeft=Math.max(0,scroll.scrollLeft-Math.min(maxStep,(rect.left+edgeSize-clientX)*.35));else if(clientX>rect.right-edgeSize)scroll.scrollLeft+=Math.min(maxStep,(clientX-(rect.right-edgeSize))*.35)}
-    const render=()=>{
-      raf=0;if(!trimStarted)return
-      const scrollDelta=(timelineScrollRef.current?.scrollLeft||0)-originScroll,rawDelta=(latestX-originX+scrollDelta)/zoom,primaryOrigin=originMap.get(clip.id)!
-      let guide:number|null=null,readout=primaryOrigin.timelineStart
-      setProject(p=>({...p,timelineClips:p.timelineClips.map(item=>{
-        if(!ids.has(item.id))return item
-        const origin=originMap.get(item.id);if(!origin)return item
-        if(edge==='start'){
-          const minDelta=Math.max(-origin.sourceIn,-origin.timelineStart),bounded=Math.max(minDelta,Math.min(origin.duration-frame,rawDelta)),requested=origin.timelineStart+bounded,result=snapResult(requested,ids),actual=Math.max(minDelta,Math.min(origin.duration-frame,result.time-origin.timelineStart))
-          if(item.id===clip.id){guide=result.guide;readout=frameSnap(origin.timelineStart+actual)}
-          return{...item,timelineStart:frameSnap(origin.timelineStart+actual),sourceIn:frameSnap(origin.sourceIn+actual),duration:frameSnap(Math.max(frame,origin.duration-actual)),sourceOut:origin.sourceOut}
+    const render=()=>{raf=0;if(!trimStarted)return;const scrollDelta=(timelineScrollRef.current?.scrollLeft||0)-originScroll,rawDelta=(latestX-originX+scrollDelta)/zoom,primary=originMap.get(clip.id)!;let requestedEdge:number
+      if(edge==='start'){const minDelta=Math.max(-primary.sourceIn,-primary.timelineStart),bounded=Math.max(minDelta,Math.min(primary.duration-frame,rawDelta));requestedEdge=primary.timelineStart+bounded}
+      else{const sourceDuration=sourceDurations.get(primary.id)??primary.sourceOut,maxDuration=Math.max(frame,sourceDuration-primary.sourceIn),boundedDuration=Math.max(frame,Math.min(maxDuration,primary.duration+rawDelta));requestedEdge=primary.timelineStart+boundedDuration}
+      const result=snapResult(requestedEdge,ids,ignoreSnap),delta=edge==='start'?result.time-primary.timelineStart:result.time-(primary.timelineStart+primary.duration),next=trimTimelineClips(snapshot,{clipId:clip.id,linkedClipIds:ids,edge,delta,frame,sourceDurations}),updatedPrimary=next.find(item=>item.id===clip.id)!
+      let displayClips=next
+      if(trimMode==='ripple'){
+        const beforePrimary=originMap.get(clip.id)||clip
+        const endDelta=frameSnap((updatedPrimary.timelineStart+updatedPrimary.duration)-(beforePrimary.timelineStart+beforePrimary.duration))
+        if(endDelta!==0){
+          const targetedTracks=new Set(project.timelineTracks.filter(track=>track.targeted && !track.locked).map(track=>track.id))
+          displayClips=shiftFollowingClips(next,targetedTracks,frameSnap(beforePrimary.timelineStart+beforePrimary.duration),endDelta,ids)
         }
-        const asset=assetFor(origin),assetDuration=origin.type==='image'||origin.type==='title'?21600:(asset?.duration||origin.sourceOut),maxDuration=Math.max(frame,assetDuration-origin.sourceIn),requestedDuration=Math.max(frame,Math.min(maxDuration,origin.duration+rawDelta)),result=snapResult(origin.timelineStart+requestedDuration,ids),duration=frameSnap(Math.max(frame,Math.min(maxDuration,result.time-origin.timelineStart)))
-        if(item.id===clip.id){guide=result.guide;readout=frameSnap(origin.timelineStart+duration)}
-        return{...item,duration,sourceOut:frameSnap(origin.sourceIn+duration)}
-      })}))
-      setSnapGuide(guide);setDragReadout(readout)
-    }
-    const move=(pointer:PointerEvent)=>{
-      latestX=pointer.clientX;autoScroll(pointer.clientX)
-      if(!trimStarted&&Math.hypot(pointer.clientX-originX,pointer.clientY-originY)>=2){trimStarted=true;ensureHistory();suppressTimelineClick.current=true;setTrimmingClipId(clip.id);document.body.classList.add('timeline-pointer-active')}
-      if(trimStarted&&!raf)raf=requestAnimationFrame(render)
-    }
-    const finish=()=>{
-      if(raf){cancelAnimationFrame(raf);render()}
-      removeEventListener('pointermove',move);removeEventListener('pointerup',finish);removeEventListener('pointercancel',finish)
-      setSnapGuide(null);setDragReadout(null);setTrimmingClipId(null);document.body.classList.remove('timeline-pointer-active')
-      if(trimStarted)window.setTimeout(()=>{suppressTimelineClick.current=false},0)
-    }
+      }
+      setProject(p=>({...p,timelineClips:displayClips}));setSnapGuide(result.guide);setDragReadout(edge==='start'?updatedPrimary.timelineStart:updatedPrimary.timelineStart+updatedPrimary.duration);setDragDelta(signedFrameSnap(delta))}
+    const move=(pointer:PointerEvent)=>{latestX=pointer.clientX;latestY=pointer.clientY;ignoreSnap=pointer.altKey;autoScroll(pointer.clientX);if(!trimStarted&&Math.hypot(latestX-originX,latestY-originY)>=2){trimStarted=true;ensureHistory();suppressTimelineClick.current=true;setTrimmingClipId(clip.id);setInteraction(edge==='start'?'trim-start':'trim-end');document.body.classList.add('timeline-trimming')}if(trimStarted&&!raf)raf=requestAnimationFrame(render)}
+    const cleanup=()=>{pointerTarget.removeEventListener('pointermove',move);pointerTarget.removeEventListener('pointerup',up);pointerTarget.removeEventListener('pointercancel',cancel);try{pointerTarget.releasePointerCapture?.(pointerId)}catch{/* pointer already released */}setSnapGuide(null);setDragReadout(null);setDragDelta(null);setTrimmingClipId(null);setInteraction('idle');document.body.classList.remove('timeline-trimming');cancelGestureRef.current=null;if(trimStarted)window.setTimeout(()=>{suppressTimelineClick.current=false},0)}
+    const finish=(restore=false)=>{if(finished)return;finished=true;if(raf){cancelAnimationFrame(raf);render()}if(restore&&trimStarted){setProject(p=>({...p,timelineClips:snapshot}));if(historySaved)setUndoStack(stack=>stack.slice(0,-1))}cleanup()}
+    const up=()=>finish(false),cancel=()=>finish(true)
+    cancelGestureRef.current=cancel
+    pointerTarget.addEventListener('pointermove',move);pointerTarget.addEventListener('pointerup',up,{once:true});pointerTarget.addEventListener('pointercancel',cancel,{once:true})
+  }
+  const beginViewerMove=(event:React.PointerEvent<HTMLDivElement>,clip:TimelineClip)=>{
+    if(event.button!==0||clip.type==='title')return
+    event.preventDefault();event.stopPropagation();selectClip(clip.id)
+    const canvas=viewerCanvasRef.current;if(!canvas)return
+    const rect=canvas.getBoundingClientRect(),originX=event.clientX,originY=event.clientY,startX=clip.positionX,startY=clip.positionY,snapshot=project.timelineClips.map(item=>({...item}));let moved=false,raf=0,latestX=originX,latestY=originY
+    const render=()=>{raf=0;const x=Math.max(-200,Math.min(200,startX+(latestX-originX)/Math.max(1,rect.width)*100)),y=Math.max(-200,Math.min(200,startY+(latestY-originY)/Math.max(1,rect.height)*100));setProject(p=>({...p,timelineClips:p.timelineClips.map(item=>item.id===clip.id?{...item,positionX:Number(x.toFixed(2)),positionY:Number(y.toFixed(2))}:item)}))}
+    const move=(pointer:PointerEvent)=>{latestX=pointer.clientX;latestY=pointer.clientY;if(!moved&&Math.hypot(latestX-originX,latestY-originY)>2){moved=true;setUndoStack(stack=>[...stack.slice(-49),snapshot]);setRedoStack([]);document.body.classList.add('viewer-transform-active')}if(moved&&!raf)raf=requestAnimationFrame(render)}
+    const finish=()=>{if(raf){cancelAnimationFrame(raf);render()}removeEventListener('pointermove',move);removeEventListener('pointerup',finish);removeEventListener('pointercancel',finish);document.body.classList.remove('viewer-transform-active')}
     addEventListener('pointermove',move);addEventListener('pointerup',finish,{once:true});addEventListener('pointercancel',finish,{once:true})
   }
   const seek=(time:number)=>{const next=Math.max(0,Math.min(canvasDuration,time));playheadRef.current=next;setPlayhead(next)}
-  const beginScrub=(event:React.PointerEvent<HTMLElement>)=>{
-    if(event.button!==0)return
-    event.preventDefault();setPlaying(false)
-    const element=event.currentTarget,update=(clientX:number)=>seek((clientX-element.getBoundingClientRect().left)/zoom)
-    update(event.clientX);document.body.classList.add('timeline-pointer-active')
-    const move=(pointer:PointerEvent)=>update(pointer.clientX)
-    const finish=()=>{removeEventListener('pointermove',move);removeEventListener('pointerup',finish);removeEventListener('pointercancel',finish);document.body.classList.remove('timeline-pointer-active')}
-    addEventListener('pointermove',move);addEventListener('pointerup',finish,{once:true});addEventListener('pointercancel',finish,{once:true})
-  }
+  const beginScrub=(event:React.PointerEvent<HTMLElement>)=>{if(event.button!==0||tool==='hand')return;event.preventDefault();setPlaying(false);const element=event.currentTarget,pointerId=event.pointerId;element.setPointerCapture?.(pointerId);setInteraction('scrub');const update=(clientX:number)=>seek((clientX-element.getBoundingClientRect().left)/zoom);update(event.clientX);const move=(pointer:PointerEvent)=>update(pointer.clientX),cleanup=()=>{element.removeEventListener('pointermove',move);element.removeEventListener('pointerup',finish);element.removeEventListener('pointercancel',cancel);try{element.releasePointerCapture?.(pointerId)}catch{/* released */}setInteraction('idle');cancelGestureRef.current=null},finish=()=>cleanup(),cancel=()=>cleanup();cancelGestureRef.current=cancel;element.addEventListener('pointermove',move);element.addEventListener('pointerup',finish,{once:true});element.addEventListener('pointercancel',cancel,{once:true})}
+  const beginTimelinePan=(event:React.PointerEvent<HTMLElement>)=>{if(event.button!==0&&event.button!==1)return;const scroll=timelineScrollRef.current;if(!scroll)return;event.preventDefault();event.stopPropagation();const element=event.currentTarget,pointerId=event.pointerId;element.setPointerCapture?.(pointerId);const originX=event.clientX,originY=event.clientY,startLeft=scroll.scrollLeft,startTop=scroll.scrollTop;setInteraction('pan');document.body.classList.add('timeline-panning');const move=(pointer:PointerEvent)=>{scroll.scrollLeft=Math.max(0,startLeft-(pointer.clientX-originX));scroll.scrollTop=Math.max(0,startTop-(pointer.clientY-originY))},cleanup=()=>{element.removeEventListener('pointermove',move);element.removeEventListener('pointerup',finish);element.removeEventListener('pointercancel',cancel);try{element.releasePointerCapture?.(pointerId)}catch{/* released */}setInteraction('idle');document.body.classList.remove('timeline-panning');cancelGestureRef.current=null},finish=()=>cleanup(),cancel=()=>{scroll.scrollLeft=startLeft;scroll.scrollTop=startTop;cleanup()};cancelGestureRef.current=cancel;element.addEventListener('pointermove',move);element.addEventListener('pointerup',finish,{once:true});element.addEventListener('pointercancel',cancel,{once:true})}
+  const updateBladePreview=(event:React.PointerEvent<HTMLElement>,clip:TimelineClip)=>{if(tool!=='blade')return;const lane=event.currentTarget.closest<HTMLElement>('[data-track-id]');if(!lane)return;const time=frameSnap((event.clientX-lane.getBoundingClientRect().left)/zoom);setBladePreview({time,clipId:clip.id})}
   const fitTimeline=()=>{const available=Math.max(500,(timelineScrollRef.current?.clientWidth||1200)-170),next=Math.max(8,Math.min(80,available/Math.max(12,sequenceDuration||45)));setZoom(Math.round(next));if(timelineScrollRef.current)timelineScrollRef.current.scrollLeft=0}
-  const handleTimelineWheel=(event:React.WheelEvent<HTMLDivElement>)=>{
-    const scroll=timelineScrollRef.current;if(!scroll)return
-    if(event.ctrlKey||event.metaKey){
-      event.preventDefault();const rect=scroll.getBoundingClientRect(),pointer=Math.max(155,event.clientX-rect.left+scroll.scrollLeft),time=Math.max(0,(pointer-155)/zoom),next=Math.max(8,Math.min(80,zoom+(event.deltaY<0?4:-4)))
-      if(next===zoom)return;setZoom(next);requestAnimationFrame(()=>{scroll.scrollLeft=Math.max(0,155+time*next-(event.clientX-rect.left))})
-    }else if(event.shiftKey||Math.abs(event.deltaX)>Math.abs(event.deltaY)){event.preventDefault();scroll.scrollLeft+=event.deltaX||event.deltaY}
-  }
+  const handleTimelineWheel=(event:React.WheelEvent<HTMLDivElement>)=>{const scroll=timelineScrollRef.current;if(!scroll)return;if(event.ctrlKey||event.metaKey){event.preventDefault();const rect=scroll.getBoundingClientRect(),pointer=Math.max(155,event.clientX-rect.left+scroll.scrollLeft),time=Math.max(0,(pointer-155)/zoom),next=Math.max(8,Math.min(80,zoom+(event.deltaY<0?4:-4)));if(next===zoom)return;setZoom(next);requestAnimationFrame(()=>{scroll.scrollLeft=Math.max(0,155+time*next-(event.clientX-rect.left))})}else if(event.shiftKey||Math.abs(event.deltaX)>Math.abs(event.deltaY)){event.preventDefault();scroll.scrollLeft+=event.deltaX||event.deltaY}}
   const attachProxy=(file?:File)=>{if(!file||!selectedAsset||selectedAsset.category!=='Video'){notify('Select a video in the media bin first');return}const proxyUrl=URL.createObjectURL(file);setProject(p=>({...p,resources:p.resources.map(asset=>asset.id===selectedAsset.id?{...asset,proxyUrl,proxyName:file.name}:asset)}));setProxyMode(true);notify(`Proxy attached to ${selectedAsset.name}`)}
   const restoreRevision=(revision:TimelineRevision)=>{setUndoStack(stack=>[...stack.slice(-49),project.timelineClips.map(clip=>({...clip}))]);setProject(p=>({...p,timelineClips:revision.clips.map(clip=>({...clip})),timelineTracks:revision.tracks.map(track=>({...track})),timelineMarkers:revision.markers.map(marker=>({...marker}))}));setSelectedClipId(null);setSelectedClipIds([]);setShowHistory(false);notify(`Restored ${revision.label}`)}
+  const addTimelineMarker=()=>{
+    const marker={id:makeId(),time:frameSnap(playhead),label:`Marker · ${formatTimecode(playhead)}`,color:'#c8ff2f'}
+    setProject(p=>({...p,timelineMarkers:[...p.timelineMarkers,marker]}))
+    notify(`Marker added at ${formatTimecode(playhead)}`)
+  }
+  const updateTrack=(id:string,update:Partial<TimelineTrack>)=>setProject(p=>({...p,timelineTracks:p.timelineTracks.map(track=>track.id===id?{...track,...update}:track)}))
+
+  const bindMediaElement=(element:HTMLMediaElement|null)=>{if(element&&element.dataset.mediaKey)mediaElements.current.set(element.dataset.mediaKey,element)}
+  const mediaKeyForVideo=(clip:TimelineClip)=>`video-${clip.id}`
+  const mediaKeyForAudio=(clip:TimelineClip)=>`${clip.type==='audio'?'audio':'implicit'}-${clip.id}`
+  const expectedMediaTime=(clip:TimelineClip,time=playheadRef.current)=>Math.max(0,clip.sourceIn+(time-clip.timelineStart))
+  const visualMediaEntries=visualLayers.filter(clip=>clip.type==='video').map(clip=>({key:mediaKeyForVideo(clip),clip,source:sourceFor(clip,true)}))
+  const audioMediaEntries=audioLayers.map(clip=>({key:mediaKeyForAudio(clip),clip,source:clip.type==='audio'?sourceFor(clip,true):sourceFor(clip,false)})).filter(entry=>Boolean(entry.source))
+  const activeMediaEntries=[...visualMediaEntries,...audioMediaEntries]
+  const mediaSignature=activeMediaEntries.map(entry=>`${entry.key}:${entry.source||''}`).join('|')
+  const syncElement=(element:HTMLMediaElement,clip:TimelineClip,force=false)=>{if(element.readyState<1)return;const expected=Math.min(expectedMediaTime(clip),Number.isFinite(element.duration)?Math.max(0,element.duration-frame):expectedMediaTime(clip));if(force||Math.abs(element.currentTime-expected)>(playing ? .4 : .08)){try{element.currentTime=expected}catch{/* loadedmetadata retries */}}}
+  const syncActiveMedia=(force=false)=>{activeMediaEntries.forEach(({key,clip})=>{const element=mediaElements.current.get(key);if(!element)return;syncElement(element,clip,force);if(element instanceof HTMLAudioElement)element.volume=Math.max(0,Math.min(1,clip.volume));if(playing&&element.readyState>=2&&element.paused)element.play().catch(()=>{});if(!playing&&!element.paused)element.pause()})}
+  const togglePlayback=()=>{
+    if(playing){activeMediaEntries.forEach(({key})=>mediaElements.current.get(key)?.pause());setPlaying(false);return}
+    lastFrame.current=performance.now();activeMediaEntries.forEach(({key,clip})=>{const element=mediaElements.current.get(key);if(!element)return;syncElement(element,clip,true);element.play().catch(()=>{})});setPlaying(true)
+  }
+  const mediaLayerStyle=(clip:TimelineClip,zIndex:number):React.CSSProperties=>({zIndex,opacity:clip.opacity,objectFit:clip.fit.toLowerCase() as React.CSSProperties['objectFit'],transform:`translate(${clip.positionX}%, ${clip.positionY}%) rotate(${clip.rotation}deg) scale(${clip.scale}) scaleX(${clip.flipX?-1:1}) scaleY(${clip.flipY?-1:1})`,mixBlendMode:clip.blendMode==='Normal'?'normal':clip.blendMode.toLowerCase() as React.CSSProperties['mixBlendMode']})
+
   const revisionSignature=draggingClipId||trimmingClipId?'':JSON.stringify({clips:project.timelineClips,tracks:project.timelineTracks,markers:project.timelineMarkers})
   useEffect(()=>{const valid=new Set(project.timelineClips.map(clip=>clip.id));setSelectedClipIds(current=>{const next=current.filter(id=>valid.has(id));return next.length===current.length?current:next});if(selectedClipId&&!valid.has(selectedClipId))setSelectedClipId(null)},[project.timelineClips,selectedClipId])
   useEffect(()=>{try{const saved=localStorage.getItem(`x1-editor-revisions-${project.id}`);setRevisions(saved?JSON.parse(saved):[])}catch{setRevisions([])}},[project.id])
   useEffect(()=>{if(!revisionSignature)return;if(revisionTimer.current)window.clearTimeout(revisionTimer.current);revisionTimer.current=window.setTimeout(()=>{setRevisions(current=>{const latest=current[0];if(latest&&JSON.stringify({clips:latest.clips,tracks:latest.tracks,markers:latest.markers})===revisionSignature)return current;const now=new Date(),next:TimelineRevision={id:makeId(),savedAt:now.toISOString(),label:`${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · ${project.timelineClips.length} clips`,clips:project.timelineClips.map(clip=>({...clip})),tracks:project.timelineTracks.map(track=>({...track})),markers:project.timelineMarkers.map(marker=>({...marker}))},updated=[next,...current].slice(0,20);try{localStorage.setItem(`x1-editor-revisions-${project.id}`,JSON.stringify(updated))}catch{/* History remains in memory if browser storage is full. */}return updated})},1200);return()=>{if(revisionTimer.current)window.clearTimeout(revisionTimer.current)}},[revisionSignature,project.id])
   useEffect(()=>{playheadRef.current=playhead},[playhead])
-  const expectedDisplayTime=(time=playheadRef.current)=>activeDisplay?Math.max(0,activeDisplay.sourceIn+(time-activeDisplay.timelineStart)):0
-  const syncVisibleVideo=(force=false)=>{
-    const video=player.current
-    if(!video||!activeDisplay||activeDisplay.type!=='video'||!displaySource||video.readyState<1)return
-    const expected=Math.min(Math.max(0,expectedDisplayTime()),Number.isFinite(video.duration)?Math.max(0,video.duration-frame):expectedDisplayTime())
-    if(force||Math.abs(video.currentTime-expected)>.18){
-      try{const fast=(video as HTMLVideoElement&{fastSeek?:(time:number)=>void}).fastSeek;if(!playing&&fast&&Math.abs(video.currentTime-expected)>.75)fast.call(video,expected);else video.currentTime=expected}catch{/* A later canplay event will retry the seek. */}
-    }
-  }
-  useEffect(()=>{
-    const video=player.current
-    if(!video||!activeDisplay||activeDisplay.type!=='video'||!displaySource){setMediaState('idle');return}
-    setMediaState(video.readyState>=2?'ready':'loading')
-    const prepare=()=>{syncVisibleVideo(true);setMediaState('ready');if(playing)video.play().catch(()=>setMediaState('loading'))}
-    if(video.readyState>=1)prepare();else video.addEventListener('loadedmetadata',prepare,{once:true})
-    return()=>video.removeEventListener('loadedmetadata',prepare)
-  },[activeDisplay?.id,displaySource,proxyMode])
-  useEffect(()=>{
-    const video=player.current
-    if(!video)return
-    if(!playing){lastFrame.current=null;video.pause();syncVisibleVideo(true);return}
-    if(activeDisplay?.type==='video'&&displaySource){
-      const start=()=>{syncVisibleVideo(true);video.play().then(()=>setMediaState('ready')).catch(()=>setMediaState(video.readyState>=2?'error':'loading'))}
-      if(video.readyState>=2)start();else{setMediaState('loading');video.addEventListener('canplay',start,{once:true});return()=>video.removeEventListener('canplay',start)}
-    }
-  },[playing,activeDisplay?.id,displaySource])
-  useEffect(()=>{
-    if(playing)return
-    const animation=requestAnimationFrame(()=>syncVisibleVideo(true))
-    return()=>cancelAnimationFrame(animation)
-  },[playhead,playing,activeDisplay?.id,displaySource])
-  useEffect(()=>{
-    if(!playing){lastFrame.current=null;return}
-    let cancelled=false,animation=0
-    const tick=(now:number)=>{
-      if(cancelled)return
-      const last=lastFrame.current??now;lastFrame.current=now
-      const next=Math.min(sequenceDuration,playheadRef.current+Math.min(.12,Math.max(0,(now-last)/1000)))
-      playheadRef.current=next;setPlayhead(next)
-      const video=player.current
-      if(video&&activeDisplay?.type==='video'&&displaySource&&video.readyState>=1&&!video.seeking){
-        const expected=Math.max(0,activeDisplay.sourceIn+(next-activeDisplay.timelineStart)),drift=Math.abs(video.currentTime-expected)
-        if(drift>.8){try{video.currentTime=expected}catch{/* Retry on the next frame. */}}
-        if(video.paused&&video.readyState>=2)video.play().catch(()=>{})
-      }
-      if(next>=sequenceDuration){setPlaying(false);return}
-      animation=requestAnimationFrame(tick)
-    }
-    animation=requestAnimationFrame(tick)
-    return()=>{cancelled=true;cancelAnimationFrame(animation)}
-  },[playing,sequenceDuration,activeDisplay?.id,displaySource])
-  useEffect(()=>{
-    if(!playing||!timelineScrollRef.current)return
-    const scroll=timelineScrollRef.current,x=155+playhead*zoom,left=scroll.scrollLeft,right=left+scroll.clientWidth
-    if(x>right-130)scroll.scrollLeft=Math.max(0,x-scroll.clientWidth+180)
-    else if(x<left+170)scroll.scrollLeft=Math.max(0,x-210)
-  },[playhead,playing,zoom])
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.target as HTMLElement)?.matches('input,textarea,select'))return;if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();return}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();setSelectedClipIds(project.timelineClips.map(clip=>clip.id));setSelectedClipId(project.timelineClips[0]?.id||null);return}if(event.code==='Space'){event.preventDefault();setPlaying(value=>!value)}else if(event.key.toLowerCase()==='s'&&selectedClip)splitClip(selectedClip);else if(event.key.toLowerCase()==='g')groupSelection();else if(event.key.toLowerCase()==='u')ungroupSelection();else if(event.key==='Delete'&&event.shiftKey)rippleDelete();else if(event.key==='Delete'||event.key==='Backspace')lift();else if(event.key.toLowerCase()==='b')setTool('blade');else if(event.key.toLowerCase()==='v')setTool('select');else if(event.key==='ArrowLeft')seek(playhead-(event.shiftKey?1:frame));else if(event.key==='ArrowRight')seek(playhead+(event.shiftKey?1:frame))};addEventListener('keydown',key);return()=>removeEventListener('keydown',key)},[selectedClipId,selectedClipIds,playhead,undoStack,redoStack,project.timelineClips,rippleAll])
-  const exportPlan=()=>downloadText(`${project.title.replace(/[^a-z0-9]+/gi,'-')}-sequence.json`,JSON.stringify({version:4,fps:EDIT_FPS,duration:sequenceDuration,tracks:project.timelineTracks,clips:project.timelineClips.map(clip=>({...clip,assetName:assetFor(clip)?.name})),markers:project.timelineMarkers},null,2))
-  const updateTrack=(id:string,update:Partial<TimelineTrack>)=>setProject(p=>({...p,timelineTracks:p.timelineTracks.map(track=>track.id===id?{...track,...update}:track)}))
+  useEffect(()=>{const activeKeys=new Set(activeMediaEntries.map(entry=>entry.key));mediaElements.current.forEach((element,key)=>{if(!activeKeys.has(key)){element.pause();mediaElements.current.delete(key)}});setMediaState(activeDisplay?.type==='video'?'loading':'idle');requestAnimationFrame(()=>syncActiveMedia(true))},[mediaSignature,activeDisplay?.id,proxyMode])
+  useEffect(()=>{if(!playing){lastFrame.current=null;syncActiveMedia(true);return}syncActiveMedia(true);activeMediaEntries.forEach(({key})=>mediaElements.current.get(key)?.play().catch(()=>{}))},[playing,mediaSignature])
+  useEffect(()=>{if(playing)return;const animation=requestAnimationFrame(()=>syncActiveMedia(true));return()=>cancelAnimationFrame(animation)},[playhead,playing,mediaSignature])
+  useEffect(()=>{if(!playing){lastFrame.current=null;return}let cancelled=false,animation=0;const tick=(now:number)=>{if(cancelled)return;const last=lastFrame.current??now;lastFrame.current=now;const next=Math.min(sequenceDuration,playheadRef.current+Math.min(.12,Math.max(0,(now-last)/1000)));playheadRef.current=next;setPlayhead(next);activeMediaEntries.forEach(({key,clip})=>{const element=mediaElements.current.get(key);if(!element)return;syncElement(element,clip,false);if(element.readyState>=2&&element.paused)element.play().catch(()=>{if(clip.id===activeDisplay?.id)setMediaState(element.readyState>=2?'error':'loading')})});if(next>=sequenceDuration){setPlaying(false);return}animation=requestAnimationFrame(tick)};animation=requestAnimationFrame(tick);return()=>{cancelled=true;cancelAnimationFrame(animation)}},[playing,sequenceDuration,mediaSignature])
+  useEffect(()=>{if(!playing||!timelineScrollRef.current)return;const scroll=timelineScrollRef.current,x=155+playhead*zoom,left=scroll.scrollLeft,right=left+scroll.clientWidth;if(x>right-130)scroll.scrollLeft=Math.max(0,x-scroll.clientWidth+180);else if(x<left+170)scroll.scrollLeft=Math.max(0,x-210)},[playhead,playing,zoom])
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&cancelGestureRef.current){event.preventDefault();cancelGestureRef.current();return}if((event.target as HTMLElement)?.matches('input,textarea,select'))return;if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();return}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();setSelectedClipIds(project.timelineClips.map(clip=>clip.id));setSelectedClipId(project.timelineClips[0]?.id||null);return}if(event.code==='Space'){event.preventDefault();togglePlayback()}else if(event.key.toLowerCase()==='s'&&selectedClip)splitClip(selectedClip);else if(event.key.toLowerCase()==='e'&&selectedClip?.type==='video')extractAudio(selectedClip);else if(event.key.toLowerCase()==='g')groupSelection();else if(event.key.toLowerCase()==='u')ungroupSelection();else if(event.key==='Delete'&&event.shiftKey)rippleDelete();else if(event.key==='Delete'||event.key==='Backspace')lift();else if(event.key.toLowerCase()==='b')setTool('blade');else if(event.key.toLowerCase()==='t')setTool('trim');else if(event.key.toLowerCase()==='h')setTool('hand');else if(event.key.toLowerCase()==='a'||event.key.toLowerCase()==='v')setTool('select');else if(event.key.toLowerCase()==='n')setSnapping(value=>!value);else if(event.key==='ArrowLeft')seek(playhead-(event.shiftKey?1:frame));else if(event.key==='ArrowRight')seek(playhead+(event.shiftKey?1:frame))};addEventListener('keydown',key);return()=>removeEventListener('keydown',key)},[selectedClipId,selectedClipIds,playhead,undoStack,redoStack,project.timelineClips,rippleAll])
+  const exportPlan=()=>downloadText(`${project.title.replace(/[^a-z0-9]+/gi,'-')}-sequence.json`,JSON.stringify({version:7,fps:EDIT_FPS,duration:sequenceDuration,editorSettings:project.editorSettings,tracks:project.timelineTracks,clips:project.timelineClips.map(clip=>({...clip,assetName:assetFor(clip)?.name})),markers:project.timelineMarkers},null,2))
+
   return <div className="studio-editor">
-    <StageHeader index="05" eyebrow="ROUGH CUT" title="Shape the sequence." copy="Drag, split, trim and layer the story quickly. Keep finishing work for Resolve." action={<div className="runtime"><span>{formatPrecise(sequenceDuration)}</span><small>{project.timelineClips.length} CLIPS · {project.timelineMarkers.length} MARKERS</small></div>}/>
-    <div className="editor-commandbar"><div><button className={tool==='select'?'active':''} onClick={()=>setTool('select')} title="Select tool (V)">↖ <span>Select</span></button><button className={tool==='blade'?'active':''} onClick={()=>setTool('blade')} title="Blade tool (B)">✂ <span>Blade</span></button><i/><span className="selection-count">{selectedClipIds.length?`${selectedClipIds.length} selected`:'Frame accurate · 25 fps'}</span></div><div><button disabled={!undoStack.length} onClick={undo} title="Undo">↶</button><button disabled={!redoStack.length} onClick={redo} title="Redo">↷</button><button disabled={!selectedClip} onClick={()=>selectedClip&&splitClip(selectedClip)}><Icon name="edit" size={14}/> Split</button><button disabled={!selectedClipIds.length} onClick={lift}><Icon name="trash" size={14}/> Lift</button><button disabled={!selectedClipIds.length} onClick={rippleDelete}>⇤ Ripple</button><button className={rippleAll?'active':''} onClick={()=>setRippleAll(value=>!value)} title="Ripple every unlocked track">All tracks</button><button disabled={selectedClipIds.length<2} onClick={groupSelection}>⌘ Group</button><button disabled={!selectedClipIds.length} onClick={ungroupSelection}>Ungroup</button><button className={snapping?'active':''} onClick={()=>setSnapping(value=>!value)}>⌁ Snap</button></div><div><button onClick={addTitle}>T+ Title</button><button className={showHistory?'active':''} onClick={()=>setShowHistory(value=>!value)}>◷ History</button><button onClick={()=>setShowShortcuts(value=>!value)}>⌨ Shortcuts</button><button className="secondary" onClick={()=>importInput.current?.click()}><Icon name="upload"/> Import</button><button className="primary" onClick={exportPlan}><Icon name="download"/> Edit plan</button></div></div>
+    <StageHeader index="05" eyebrow="ROUGH CUT" title="Shape the sequence." copy="Layer picture and sound independently, transform clips, trim precisely, and keep the edit workspace clean, stable and smooth for Resolve." action={<div className="runtime"><span>{formatPrecise(sequenceDuration)}</span><small>{project.timelineClips.length} CLIPS · {project.timelineMarkers.length} MARKERS</small></div>}/>
+    <div className="editor-utilitybar panel">
+      <div className="utilitybar-copy"><span>EDIT WORKSPACE</span><b>Picture, sound and sequence settings</b><small>Primary editing tools are docked directly above the timeline.</small></div>
+      <div className="utilitybar-actions">
+        <label className="aspect-control"><span>Canvas</span><select value={aspectRatio} onChange={e=>updateEditorSettings({aspectRatio:e.target.value as Project['editorSettings']['aspectRatio']})}><option>16:9</option><option>9:16</option><option>1:1</option><option>4:5</option></select></label>
+        <button onClick={addTitle}><Icon name="plus" size={14}/><span>Title</span></button>
+        <button className={showHistory?'active':''} onClick={()=>setShowHistory(value=>!value)}><Icon name="history" size={14}/><span>History</span></button>
+        <button onClick={()=>setShowShortcuts(value=>!value)}><Icon name="keyboard" size={14}/><span>Shortcuts</span></button>
+        <button className="secondary" onClick={()=>importInput.current?.click()}><Icon name="upload" size={14}/><span>Import</span></button>
+        <button className="primary" onClick={exportPlan}><Icon name="download" size={14}/><span>Edit plan</span></button>
+      </div>
+    </div>
     {showHistory&&<div className="history-popover"><header><div><b>Autosave history</b><small>Timeline snapshots stay in this browser.</small></div><button onClick={()=>setShowHistory(false)}><Icon name="x"/></button></header>{revisions.length?<div>{revisions.map((revision,index)=><button key={revision.id} onClick={()=>restoreRevision(revision)}><span><b>{index===0?'Current autosave':revision.label}</b><small>{new Date(revision.savedAt).toLocaleString()} · {revision.clips.length} clips</small></span><Icon name="arrow" size={14}/></button>)}</div>:<p>Your first timeline snapshot will appear after an edit.</p>}</div>}
     <div className="editor-workbench">
       <aside className="editor-bin panel">
         <header><div>{(['media','shots','transcript'] as const).map(name=><button key={name} className={bin===name?'active':''} onClick={()=>setBin(name)}>{name}</button>)}</div><button onClick={()=>importInput.current?.click()}><Icon name="plus"/></button></header>
-        {bin==='media'&&<>
-          <div className="bin-search"><Icon name="search"/><input value={mediaSearch} onChange={e=>setMediaSearch(e.target.value)} placeholder="Search this project"/></div>
-          <div className="bin-media-grid">{project.resources.filter(asset=>['Video','Images','Audio'].includes(asset.category)&&asset.name.toLowerCase().includes(mediaSearch.toLowerCase())).map(asset=><article key={asset.id} draggable onDragStart={e=>{e.dataTransfer.setData('application/x-x1-asset',asset.id);setSelectedAssetId(asset.id)}} className={selectedAssetId===asset.id?'selected':''} onClick={()=>setSelectedAssetId(asset.id)}>
-            {asset.category==='Video'&&asset.url?<div className="bin-video-thumb">{asset.posterUrl&&<img src={asset.posterUrl} alt=""/>}<video src={asset.proxyUrl&&proxyMode?asset.proxyUrl:asset.url} poster={asset.posterUrl} muted preload="metadata" onMouseEnter={e=>e.currentTarget.play().catch(()=>{})} onMouseLeave={e=>{e.currentTarget.pause();e.currentTarget.currentTime=0}}/>{asset.proxyUrl&&<i>PROXY</i>}</div>:asset.category==='Images'&&asset.url?<img src={asset.url} alt=""/>:asset.category==='Audio'?<span className="bin-audio-thumb"><Icon name="mic"/><i>{(asset.waveform||waveformPattern(asset.name,22)).slice(0,22).map((bar,index)=><b key={index} style={{height:`${Math.max(12,bar*88)}%`}}/>)}</i></span>:<span><Icon name="video"/></span>}
-            <div><b>{asset.name}</b><small>{asset.role} · {asset.duration?formatPrecise(asset.duration):asset.category}</small></div>
-          </article>)}</div>
-          {selectedAsset&&<div className="bin-selection-meta"><span><b>{selectedAsset.name}</b><small>{selectedAsset.proxyUrl?`Proxy: ${selectedAsset.proxyName}`:'Original media'}</small></span>{selectedAsset.category==='Video'&&<button onClick={()=>proxyInput.current?.click()}>{selectedAsset.proxyUrl?'Replace proxy':'Attach proxy'}</button>}</div>}
-          {!project.resources.some(asset=>['Video','Images','Audio'].includes(asset.category))&&<div className="bin-empty"><Icon name="folder"/><b>No media yet</b><small>Import local files, then drag them to a compatible track.</small><button onClick={()=>importInput.current?.click()}>Choose files</button></div>}
-        </>}
+        {bin==='media'&&<><div className="bin-search"><Icon name="search"/><input value={mediaSearch} onChange={e=>setMediaSearch(e.target.value)} placeholder="Search this project"/></div><div className="bin-media-grid">{project.resources.filter(asset=>['Video','Images','Audio'].includes(asset.category)&&asset.name.toLowerCase().includes(mediaSearch.toLowerCase())).map(asset=><article key={asset.id} draggable onDragStart={e=>{e.dataTransfer.setData('application/x-x1-asset',asset.id);setSelectedAssetId(asset.id)}} className={selectedAssetId===asset.id?'selected':''} onClick={()=>setSelectedAssetId(asset.id)}>{asset.category==='Video'&&asset.url?<div className="bin-video-thumb">{asset.posterUrl&&<img src={asset.posterUrl} alt=""/>}<video src={asset.proxyUrl&&proxyMode?asset.proxyUrl:asset.url} poster={asset.posterUrl} muted preload="metadata" onMouseEnter={e=>e.currentTarget.play().catch(()=>{})} onMouseLeave={e=>{e.currentTarget.pause();e.currentTarget.currentTime=0}}/>{asset.proxyUrl&&<i>PROXY</i>}</div>:asset.category==='Images'&&asset.url?<img src={asset.url} alt=""/>:asset.category==='Audio'?<span className="bin-audio-thumb"><Icon name="mic"/><i>{(asset.waveform||waveformPattern(asset.name,22)).slice(0,22).map((bar,index)=><b key={index} style={{height:`${Math.max(12,bar*88)}%`}}/>)}</i></span>:<span><Icon name="video"/></span>}<div><b>{asset.name}</b><small>{asset.role} · {asset.duration?formatPrecise(asset.duration):asset.category}</small></div></article>)}</div>{selectedAsset&&<div className="bin-selection-meta"><span><b>{selectedAsset.name}</b><small>{selectedAsset.proxyUrl?`Proxy: ${selectedAsset.proxyName}`:'Original media'}</small></span>{selectedAsset.category==='Video'&&<button onClick={()=>proxyInput.current?.click()}>{selectedAsset.proxyUrl?'Replace proxy':'Attach proxy'}</button>}</div>}{!project.resources.some(asset=>['Video','Images','Audio'].includes(asset.category))&&<div className="bin-empty"><Icon name="folder"/><b>No media yet</b><small>Import local files, then drag them to a compatible track.</small><button onClick={()=>importInput.current?.click()}>Choose files</button></div>}</>}
         {bin==='shots'&&<div className="bin-shot-list">{[...project.shots].sort((a,b)=>(a.order||0)-(b.order||0)).map(shot=><article key={shot.id} draggable onDragStart={e=>e.dataTransfer.setData('application/x-x1-shot',shot.id)}><span>{shot.shotNumber}</span><div><b>{shot.description}</b><small>{shot.section} · {shot.shotType}</small></div><i className={shot.assetId?'linked':''}>{shot.assetId?'MEDIA':'MARKER'}</i></article>)}</div>}
         {bin==='transcript'&&<div className="bin-transcript">{project.transcript.map(line=><button key={line.id} className={line.included?'':'removed'} onClick={()=>seek(line.start)}><span>{formatPrecise(line.start)}</span><p>{line.text}</p></button>)}</div>}
       </aside>
       <section className="sequence-viewer panel" ref={viewerRef}>
-        <div className="viewer-canvas">
-          {displaySource&&activeDisplay?.type==='video'?<video key={`${activeDisplay.id}-${displaySource}-${proxyMode}`} ref={player} src={displaySource} poster={displayAsset?.posterUrl} preload="auto" playsInline onLoadStart={()=>setMediaState('loading')} onLoadedMetadata={event=>{const video=event.currentTarget,expected=Math.max(0,activeDisplay.sourceIn+(playheadRef.current-activeDisplay.timelineStart));try{video.currentTime=Math.min(expected,Math.max(0,video.duration-frame))}catch{/* canplay retries */}setMediaState('ready')}} onCanPlay={event=>{setMediaState('ready');if(playing)event.currentTarget.play().catch(()=>setMediaState('error'))}} onPlaying={()=>setMediaState('ready')} onWaiting={()=>{if(playing)setMediaState('buffering')}} onStalled={()=>{if(playing)setMediaState('buffering')}} onError={()=>{setMediaState('error');setPlaying(false);notify('This video codec could not start in Chrome. Attach an H.264 MP4 proxy for instant editing.')}}/>:displayAsset?.url&&activeDisplay?.type==='image'?<img src={displayAsset.url} alt=""/>:<div className="viewer-empty"><img src="/joint-x-logo.png" alt="Joint X"/><span>SEQUENCE VIEWER</span><b>{project.timelineClips.length?'Move the playhead onto a visible video or image clip.':'Drag a recording onto any video track to begin.'}</b><small>The original media remains untouched.</small></div>}
-          {activeTitle&&<div className={`viewer-overlay fit-${activeTitle.fit.toLowerCase()}`} style={{opacity:activeTitle.opacity}}><div className="viewer-title">{activeTitle.text}</div></div>}
-          {activeDisplay?.type==='video'&&(mediaState==='loading'||mediaState==='buffering')&&<div className="viewer-buffering"><i/><b>{mediaState==='buffering'?'Catching up…':'Preparing the first frame…'}</b><small>Playback starts as soon as the local file is ready. You do not need to wait for the whole video.</small></div>}
-          {activeDisplay?.type==='video'&&mediaState==='error'&&<div className="viewer-playback-error"><Icon name="video"/><b>Chrome cannot play this file smoothly.</b><small>Use an H.264 MP4 proxy while keeping the original for Resolve.</small><button onClick={()=>{if(displayAsset){setSelectedAssetId(displayAsset.id);window.setTimeout(()=>proxyInput.current?.click(),0)}}}>Attach playback proxy</button></div>}
-          {activeCaption&&<div className="sequence-caption">{activeCaption}</div>}<div className="viewer-safe"><span/></div>{displayAsset?.proxyUrl&&<span className="viewer-quality-badge">{proxyMode?'PROXY':'ORIGINAL'}</span>}
+        <div className="viewer-stage-shell">
+          <div className={`viewer-canvas aspect-${aspectRatio.replace(':','-')}`} ref={viewerCanvasRef} style={{aspectRatio:aspectCss[aspectRatio],width:portraitAspect?'auto':'100%',height:portraitAspect?'100%':'auto',background:project.editorSettings.background}}>
+            {visualLayers.length?visualLayers.map((clip,index)=>{const asset=assetFor(clip),source=sourceFor(clip,true),style=mediaLayerStyle(clip,index+1),selected=selectedClipId===clip.id;return <div key={clip.id} className={`viewer-media-layer ${selected?'selected':''}`} style={{zIndex:index+1}} onPointerDown={e=>beginViewerMove(e,clip)} onDoubleClick={()=>resetTransform(clip)}>{clip.type==='video'&&source?<video data-media-key={mediaKeyForVideo(clip)} ref={bindMediaElement} src={source} poster={asset?.posterUrl} preload="auto" muted playsInline style={style} onLoadStart={()=>{if(clip.id===activeDisplay?.id)setMediaState('loading')}} onLoadedMetadata={event=>{syncElement(event.currentTarget,clip,true);if(clip.id===activeDisplay?.id)setMediaState('ready');if(playing)event.currentTarget.play().catch(()=>{})}} onCanPlay={event=>{if(clip.id===activeDisplay?.id)setMediaState('ready');if(playing)event.currentTarget.play().catch(()=>{})}} onWaiting={()=>{if(playing&&clip.id===activeDisplay?.id)setMediaState('buffering')}} onStalled={()=>{if(playing&&clip.id===activeDisplay?.id)setMediaState('buffering')}} onError={()=>{if(clip.id===activeDisplay?.id){setMediaState('error');notify('This video codec could not start in Chrome. Attach an H.264 MP4 proxy for smoother editing.')}}}/>:clip.type==='image'&&asset?.url?<img src={asset.url} alt="" style={style}/>:null}</div>}):<div className="viewer-empty"><img src="/joint-x-logo.png" alt="Joint X"/><span>SEQUENCE VIEWER</span><b>{project.timelineClips.length?'Move the playhead onto a visible video or image clip.':'Drag a recording onto any video track to begin.'}</b><small>The original media remains untouched.</small></div>}
+            {titleLayers.map((clip,index)=><div key={clip.id} className={`viewer-title-layer ${selectedClipId===clip.id?'selected':''}`} style={mediaLayerStyle(clip,visualLayers.length+index+2)} onPointerDown={()=>selectClip(clip.id)}><div className="viewer-title">{clip.text}</div></div>)}
+            {activeDisplay?.type==='video'&&(mediaState==='loading'||mediaState==='buffering')&&(visualLayers.length>1?<div className="viewer-layer-status"><i/><span>{mediaState==='buffering'?'Top layer catching up':'Preparing top layer'}</span></div>:<div className="viewer-buffering"><i/><b>{mediaState==='buffering'?'Catching up…':'Preparing the active layer…'}</b><small>The sequence clock keeps moving while local media catches up.</small></div>)}
+            {activeDisplay?.type==='video'&&mediaState==='error'&&<div className="viewer-playback-error"><Icon name="video"/><b>Chrome cannot play this layer smoothly.</b><small>Use an H.264 MP4 proxy while keeping the original for Resolve.</small><button onClick={()=>{if(displayAsset){setSelectedAssetId(displayAsset.id);window.setTimeout(()=>proxyInput.current?.click(),0)}}}>Attach playback proxy</button></div>}
+            {activeCaption&&<div className="sequence-caption">{activeCaption}</div>}<div className="viewer-safe"><span/></div>{displayAsset?.proxyUrl&&<span className="viewer-quality-badge">{proxyMode?'PROXY':'ORIGINAL'}</span>}
+          </div>
         </div>
-        <div className="viewer-transport"><span>{formatTimecode(playhead)} <i>/</i> {formatTimecode(sequenceDuration)}</span><div><button onClick={()=>seek(playhead-frame)} title="Previous frame">‹</button><button className="play" onClick={()=>setPlaying(value=>!value)}><Icon name={playing?'pause':'play'}/></button><button onClick={()=>seek(playhead+frame)} title="Next frame">›</button></div><div>{displayAsset?.proxyUrl&&<button className={proxyMode?'quality-on':''} onClick={()=>setProxyMode(value=>!value)}>{proxyMode?'PXY':'ORG'}</button>}<button onClick={()=>seek(0)}>↤</button><button onClick={()=>seek(sequenceDuration)}>↦</button><button onClick={()=>viewerRef.current?.requestFullscreen?.()}><Icon name="expand"/></button></div></div>
+        <div className="sequence-audio-engine" aria-hidden>{audioMediaEntries.map(({clip,key,source})=>{if(!source)return null;return <audio key={key} data-media-key={key} ref={bindMediaElement} src={source} preload="auto" onLoadedMetadata={event=>{syncElement(event.currentTarget,clip,true);event.currentTarget.volume=Math.max(0,Math.min(1,clip.volume));if(playing)event.currentTarget.play().catch(()=>{})}}/>})}</div>
+        <div className="viewer-transport"><span>{formatTimecode(playhead)} <i>/</i> {formatTimecode(sequenceDuration)}</span><div><button onClick={()=>seek(playhead-frame)} title="Previous frame">‹</button><button className="play" onClick={togglePlayback}><Icon name={playing?'pause':'play'}/></button><button onClick={()=>seek(playhead+frame)} title="Next frame">›</button></div><div>{displayAsset?.proxyUrl&&<button className={proxyMode?'quality-on':''} onClick={()=>setProxyMode(value=>!value)}>{proxyMode?'PXY':'ORG'}</button>}<button onClick={()=>seek(0)}>↤</button><button onClick={()=>seek(sequenceDuration)}>↦</button><button onClick={()=>viewerRef.current?.requestFullscreen?.()}><Icon name="expand"/></button></div></div>
       </section>
-      <aside className="clip-inspector panel"><header><span>INSPECTOR</span><small>{selectedClipIds.length>1?'MULTI':selectedClip?'CLIP':'SEQUENCE'}</small></header>{selectedClip&&selectedClipIds.length<=1?<><div className="inspector-title"><span style={{background:project.timelineTracks.find(track=>track.id===selectedClip.trackId)?.color}}/><div><b>{selectedClip.name}</b><small>{selectedClip.type} · {assetFor(selectedClip)?.role||'generated'}{selectedClip.linkGroupId?' · A/V linked':''}</small></div></div><div className="inspector-form"><label><span>TRACK</span><select value={selectedClip.trackId} onChange={e=>updateClip(selectedClip.id,{trackId:e.target.value})}>{tracks.filter(track=>trackAccepts(track,selectedClip.type)).map(track=><option value={track.id} key={track.id}>{track.label}</option>)}</select></label><label><span>START · {formatTimecode(selectedClip.timelineStart)}</span><input type="number" min="0" step={frame} value={Number(selectedClip.timelineStart.toFixed(2))} onChange={e=>updateClip(selectedClip.id,{timelineStart:frameSnap(Number(e.target.value))})}/></label><label><span>SOURCE IN</span><input type="number" min="0" step={frame} value={Number(selectedClip.sourceIn.toFixed(2))} onChange={e=>{const value=frameSnap(Number(e.target.value)),delta=value-selectedClip.sourceIn;updateClip(selectedClip.id,{sourceIn:value,duration:Math.max(frame,frameSnap(selectedClip.duration-delta))})}}/></label><label><span>DURATION · {Math.round(selectedClip.duration*EDIT_FPS)}f</span><input type="number" min={frame} step={frame} value={Number(selectedClip.duration.toFixed(2))} onChange={e=>{const duration=Math.max(frame,frameSnap(Number(e.target.value)));updateClip(selectedClip.id,{duration,sourceOut:frameSnap(selectedClip.sourceIn+duration)})}}/></label>{selectedClip.type!=='audio'&&<><label><span>FIT</span><select value={selectedClip.fit} onChange={e=>updateClip(selectedClip.id,{fit:e.target.value as TimelineClip['fit']})}><option>Cover</option><option>Contain</option></select></label><label><span>OPACITY · {Math.round(selectedClip.opacity*100)}%</span><input type="range" min="0" max="1" step=".05" value={selectedClip.opacity} onChange={e=>updateClip(selectedClip.id,{opacity:Number(e.target.value)},false)}/></label></>}{selectedClip.type==='audio'&&<label><span>VOLUME · {Math.round(selectedClip.volume*100)}%</span><input type="range" min="0" max="1.5" step=".05" value={selectedClip.volume} onChange={e=>updateClip(selectedClip.id,{volume:Number(e.target.value)},false)}/></label>}{selectedClip.type==='title'&&<label className="wide"><span>TITLE TEXT</span><textarea value={selectedClip.text||''} onChange={e=>updateClip(selectedClip.id,{text:e.target.value},false)}/></label>}</div><div className="inspector-actions"><button onClick={()=>splitClip(selectedClip)}><Icon name="edit"/> Split</button><button onClick={duplicate}><Icon name="copy"/> Duplicate</button><button onClick={lift}><Icon name="trash"/> Lift</button><button className="danger" onClick={rippleDelete}>Ripple delete</button></div></>:selectedClipIds.length>1?<div className="multi-inspector"><span>{selectedClipIds.length}</span><b>clips selected</b><small>Move, lift, duplicate or ripple these clips as one selection. Group them to preserve the relationship later.</small><div>{selectedClips.slice(0,7).map(clip=><i key={clip.id}><em style={{background:project.timelineTracks.find(track=>track.id===clip.trackId)?.color}}/>{clip.name}</i>)}</div><button onClick={groupSelection}>Group selection</button><button onClick={duplicate}>Duplicate selection</button><button onClick={lift}>Lift selection</button><button className="danger" onClick={rippleDelete}>Ripple delete selection</button></div>:<div className="sequence-inspector"><div><span>{formatTimecode(sequenceDuration)}</span><b>Sequence duration</b></div><div><span>{project.timelineClips.length}</span><b>Clips</b></div><div><span>{project.timelineMarkers.length}</span><b>Shot markers</b></div><p><Icon name="folder"/> Autosave history protects edit decisions. Originals are never rewritten.</p></div>}</aside>
+      <aside className="clip-inspector panel">
+        <header><span>INSPECTOR</span><small>{selectedClipIds.length>1?'MULTI':selectedClip?'CLIP':'SEQUENCE'}</small></header>
+        {selectedClip&&selectedClipIds.length<=1?<><div className="inspector-title"><span style={{background:trackFor(selectedClip)?.color}}/><div><b>{selectedClip.name}</b><small>{selectedClip.type} · {assetFor(selectedClip)?.role||'generated'}{selectedClip.linkGroupId?' · A/V linked':''}</small></div></div><div className="inspector-form"><label><span>TRACK</span><select value={selectedClip.trackId} onChange={e=>updateClip(selectedClip.id,{trackId:e.target.value})}>{tracks.filter(track=>trackAccepts(track,selectedClip.type)).map(track=><option value={track.id} key={track.id}>{track.label}</option>)}</select></label><label><span>START · {formatTimecode(selectedClip.timelineStart)}</span><input type="number" min="0" step={frame} value={Number(selectedClip.timelineStart.toFixed(2))} onChange={e=>updateClip(selectedClip.id,{timelineStart:frameSnap(Number(e.target.value))})}/></label><label><span>SOURCE IN</span><input type="number" min="0" step={frame} value={Number(selectedClip.sourceIn.toFixed(2))} onChange={e=>{const value=frameSnap(Number(e.target.value)),delta=value-selectedClip.sourceIn;updateClip(selectedClip.id,{sourceIn:value,duration:Math.max(frame,frameSnap(selectedClip.duration-delta))})}}/></label><label><span>DURATION · {Math.round(selectedClip.duration*EDIT_FPS)}f</span><input type="number" min={frame} step={frame} value={Number(selectedClip.duration.toFixed(2))} onChange={e=>{const duration=Math.max(frame,frameSnap(Number(e.target.value)));updateClip(selectedClip.id,{duration,sourceOut:frameSnap(selectedClip.sourceIn+duration)})}}/></label>
+          {selectedClip.type!=='audio'&&<><div className="inspector-section-title">Picture</div><label><span>FIT</span><select value={selectedClip.fit} onChange={e=>updateClip(selectedClip.id,{fit:e.target.value as TimelineClip['fit']})}><option>Cover</option><option>Contain</option></select></label><label><span>BLEND</span><select value={selectedClip.blendMode} onChange={e=>updateClip(selectedClip.id,{blendMode:e.target.value as TimelineClip['blendMode']})}><option>Normal</option><option>Multiply</option><option>Screen</option><option>Overlay</option><option>Lighten</option><option>Darken</option></select></label><label className="wide"><span>OPACITY · {Math.round(selectedClip.opacity*100)}%</span><input type="range" min="0" max="1" step=".01" value={selectedClip.opacity} onChange={e=>updateClip(selectedClip.id,{opacity:Number(e.target.value)},false)}/></label><div className="inspector-section-title">Transform</div><label><span>SCALE · {Math.round(selectedClip.scale*100)}%</span><input type="range" min=".1" max="3" step=".01" value={selectedClip.scale} onChange={e=>updateClip(selectedClip.id,{scale:Number(e.target.value)},false)}/></label><label><span>ROTATE</span><input type="number" min="-360" max="360" step="1" value={selectedClip.rotation} onChange={e=>updateClip(selectedClip.id,{rotation:Number(e.target.value)},false)}/></label><label><span>POSITION X</span><input type="number" min="-200" max="200" step="1" value={Number(selectedClip.positionX.toFixed(1))} onChange={e=>updateClip(selectedClip.id,{positionX:Number(e.target.value)},false)}/></label><label><span>POSITION Y</span><input type="number" min="-200" max="200" step="1" value={Number(selectedClip.positionY.toFixed(1))} onChange={e=>updateClip(selectedClip.id,{positionY:Number(e.target.value)},false)}/></label><div className="transform-actions wide"><button className={selectedClip.flipX?'active':''} onClick={()=>updateClip(selectedClip.id,{flipX:!selectedClip.flipX})}>Flip horizontal</button><button className={selectedClip.flipY?'active':''} onClick={()=>updateClip(selectedClip.id,{flipY:!selectedClip.flipY})}>Flip vertical</button><button onClick={()=>resetTransform(selectedClip)}>Reset</button></div></>}
+          {selectedClip.type==='audio'&&<><div className="inspector-section-title">Sound</div><label className="wide"><span>VOLUME · {Math.round(selectedClip.volume*100)}%</span><input type="range" min="0" max="1" step=".01" value={selectedClip.volume} onChange={e=>updateClip(selectedClip.id,{volume:Number(e.target.value)},false)}/></label></>}
+          {selectedClip.type==='title'&&<label className="wide"><span>TITLE TEXT</span><textarea value={selectedClip.text||''} onChange={e=>updateClip(selectedClip.id,{text:e.target.value},false)}/></label>}
+        </div><div className="inspector-actions">{selectedClip.type==='video'&&<button onClick={()=>extractAudio(selectedClip)}><Icon name="mic"/> Extract audio</button>}<button onClick={()=>splitClip(selectedClip)}><Icon name="edit"/> Split</button><button onClick={duplicate}><Icon name="copy"/> Duplicate</button><button onClick={lift}><Icon name="trash"/> Lift</button>{selectedClip.linkGroupId&&<button onClick={unlinkSelection}><Icon name="link"/> Unlink A/V</button>}<button className="danger" onClick={rippleDelete}>Ripple delete</button></div></>:selectedClipIds.length>1?<div className="multi-inspector"><span>{selectedClipIds.length}</span><b>clips selected</b><small>Move, lift, duplicate or ripple these clips as one selection. Linked A/V keeps picture and sound together.</small><div>{selectedClips.slice(0,7).map(clip=><i key={clip.id}><em style={{background:trackFor(clip)?.color}}/>{clip.name}</i>)}</div><button onClick={groupSelection}>Group selection</button><button onClick={duplicate}>Duplicate selection</button><button onClick={lift}>Lift selection</button><button className="danger" onClick={rippleDelete}>Ripple delete selection</button></div>:<div className="sequence-inspector"><div><span>{formatTimecode(sequenceDuration)}</span><b>Sequence duration</b></div><div><span>{project.timelineClips.length}</span><b>Clips</b></div><div><span>{project.timelineMarkers.length}</span><b>Shot markers</b></div><label className="sequence-setting"><span>ASPECT RATIO</span><select value={aspectRatio} onChange={e=>updateEditorSettings({aspectRatio:e.target.value as Project['editorSettings']['aspectRatio']})}><option>16:9</option><option>9:16</option><option>1:1</option><option>4:5</option></select></label><label className="sequence-setting"><span>BACKGROUND</span><input type="color" value={project.editorSettings.background} onChange={e=>updateEditorSettings({background:e.target.value})}/></label><p><Icon name="layers"/> Video layers now composite together while audio tracks continue playing independently beneath B-roll.</p></div>}
+      </aside>
     </div>
     <section className="timeline-panel panel">
-      <header className="timeline-topbar"><div><button onClick={()=>seek(0)}>↤</button><button onClick={()=>setPlaying(value=>!value)}><Icon name={playing?'pause':'play'} size={14}/></button><span className="timeline-timecode">{formatTimecode(playhead)}</span><button onClick={()=>{const marker={id:makeId(),time:frameSnap(playhead),label:'Sequence marker',color:'#c8ff2f'};setProject(p=>({...p,timelineMarkers:[...p.timelineMarkers,marker]}))}}>M+ Marker</button>{selectedClipIds.length>0&&<button onClick={()=>{setSelectedClipId(null);setSelectedClipIds([])}}>Clear selection</button>}</div><div><span>25 FPS</span><button onClick={fitTimeline}>Fit</button><button onClick={()=>setZoom(Math.max(8,zoom-4))}>−</button><input type="range" min="8" max="80" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/><button onClick={()=>setZoom(Math.min(80,zoom+4))}>+</button><span>{zoom}px/s</span></div></header>
-      <div className="timeline-scroll" ref={timelineScrollRef} onWheel={handleTimelineWheel}><div className="timeline-rack" style={{width:canvasWidth+155}}><div className="timeline-ruler-pro" style={{width:canvasWidth,marginLeft:155}} onPointerDown={beginScrub}>{Array.from({length:Math.ceil(canvasDuration/5)+1},(_,index)=>index*5).map(time=><i key={time} style={{left:time*zoom}}><span>{formatPrecise(time)}</span></i>)}{project.timelineMarkers.map(marker=><button key={marker.id} style={{left:marker.time*zoom,background:marker.color}} title={marker.label} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();seek(marker.time)}}/>)}</div>{tracks.map(track=><div className={`timeline-track-pro track-${track.kind} ${track.locked?'locked':''}`} key={track.id}><div className="track-head"><span style={{background:track.color}}/><b>{track.label}</b><div><button className={track.hidden?'off':''} onClick={()=>updateTrack(track.id,{hidden:!track.hidden})} title="Show or hide">◉</button><button className={track.muted?'off':''} onClick={()=>updateTrack(track.id,{muted:!track.muted})} title="Mute">M</button><button className={track.locked?'on':''} onClick={()=>updateTrack(track.id,{locked:!track.locked})} title="Lock">⌾</button></div></div><div className="track-lane" data-track-id={track.id} style={{width:canvasWidth}} onDragOver={e=>e.preventDefault()} onDrop={e=>handleDrop(e,track)} onPointerDown={e=>{if(e.target===e.currentTarget){setPlaying(false);seek((e.clientX-e.currentTarget.getBoundingClientRect().left)/zoom);if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey){setSelectedClipId(null);setSelectedClipIds([])}}}}>{project.timelineClips.filter(clip=>clip.trackId===track.id).map(clip=>{const asset=assetFor(clip),bars=(asset?.waveform||waveformPattern(clip.name,48)).slice(0,48);return <button key={clip.id} onPointerDown={e=>beginMove(e,clip)} className={`timeline-clip clip-${clip.type} ${selectedClipIds.includes(clip.id)?'selected':''} ${draggingClipId===clip.id?'dragging':''} ${trimmingClipId===clip.id?'trimming':''} ${clip.groupId?'grouped':''} ${clip.linkGroupId?'linked-av':''}`} style={{left:clip.timelineStart*zoom,width:Math.max(18,clip.duration*zoom),borderColor:track.color}} onClick={e=>{e.stopPropagation();if(suppressTimelineClick.current)return;const time=(e.clientX-e.currentTarget.parentElement!.getBoundingClientRect().left)/zoom;if(tool==='blade')splitClip(clip,time);else{selectClip(clip.id,e.shiftKey||e.ctrlKey||e.metaKey);seek(time)}}}>
-          <i className="trim trim-left" title="Drag to trim the start" onPointerDown={e=>beginTrim(e,clip,'start')}><span/><em>‹</em></i>{(clip.type==='video'||clip.type==='image')&&asset?.posterUrl&&<span className="clip-filmstrip" style={{backgroundImage:`url(${asset.posterUrl})`}}/>}{clip.type==='image'&&asset?.url&&!asset.posterUrl&&<span className="clip-filmstrip" style={{backgroundImage:`url(${asset.url})`}}/>}{clip.type==='audio'&&<span className="clip-waveform">{bars.map((bar,index)=><i key={index} style={{height:`${Math.max(12,bar*94)}%`}}/>)}</span>}<span className="clip-kind">{clip.type==='audio'?'≋':clip.type==='title'?'T':'▧'}</span><b>{clip.name}</b><small>{formatTimecode(clip.duration)}</small>{clip.linkGroupId&&<em className="clip-link">⌁</em>}{clip.groupId&&<em className="clip-group">G</em>}<i className="trim trim-right" title="Drag to trim the end" onPointerDown={e=>beginTrim(e,clip,'end')}><span/><em>›</em></i>
-        </button>})}</div></div>)}{snapGuide!==null&&<div className="timeline-snap-guide" style={{left:155+snapGuide*zoom}}><span>SNAP · {formatPrecise(snapGuide)}</span></div>}{dragReadout!==null&&<div className="timeline-drag-readout" style={{left:155+dragReadout*zoom}}>{formatTimecode(dragReadout)}</div>}<div className="timeline-playhead" style={{left:155+playhead*zoom}}><span>{formatTimecode(playhead)}</span></div></div></div>
+      <div className="timeline-tool-dock">
+        <div className="dock-group dock-primary-tools" aria-label="Timeline tools">
+          <button className={tool==='select'?'active':''} onClick={()=>setTool('select')} title="Selection tool (A / V)"><Icon name="cursor" size={17}/><span>Select</span><kbd>A</kbd></button>
+          <button className={tool==='trim'?'active':''} onClick={()=>setTool('trim')} title="Trim edit tool (T)"><Icon name="trimtool" size={17}/><span>Trim</span><kbd>T</kbd></button>
+          <button className={tool==='blade'?'active':''} onClick={()=>setTool('blade')} title="Blade tool (B)"><Icon name="scissors" size={17}/><span>Blade</span><kbd>B</kbd></button>
+          <button className={tool==='hand'?'active':''} onClick={()=>setTool('hand')} title="Hand tool (H)"><Icon name="handtool" size={17}/><span>Hand</span><kbd>H</kbd></button>
+        </div>
+        <div className="dock-divider"/>
+        <div className="dock-group dock-trim-controls">
+          <span className="dock-label">Trim mode</span>
+          <div className="trim-mode-switch">
+            <button className={trimMode==='standard'?'active':''} onClick={()=>setTrimMode('standard')}>Standard</button>
+            <button className={trimMode==='ripple'?'active':''} onClick={()=>setTrimMode('ripple')}>Ripple</button>
+          </div>
+          <button className="compact-action" disabled={!selectedClip} onClick={()=>applyTrimAtPlayhead('start')} title="Trim selected clip start to the playhead"><Icon name="trimtool" size={15}/><span>Start to playhead</span></button>
+          <button className="compact-action" disabled={!selectedClip} onClick={()=>applyTrimAtPlayhead('end')} title="Trim selected clip end to the playhead"><Icon name="trimtool" size={15}/><span>End to playhead</span></button>
+        </div>
+        <div className="dock-divider"/>
+        <div className="dock-group dock-edit-actions">
+          <button disabled={!undoStack.length} onClick={undo} title="Undo"><Icon name="undo" size={15}/><span>Undo</span></button>
+          <button disabled={!redoStack.length} onClick={redo} title="Redo"><Icon name="redo" size={15}/><span>Redo</span></button>
+          <button disabled={!selectedClip} onClick={()=>selectedClip&&splitClip(selectedClip)} title="Split selected linked clip"><Icon name="edit" size={14}/><span>Split</span></button>
+          <button disabled={selectedClip?.type!=='video'} onClick={()=>extractAudio()} title="Extract audio from selected video"><Icon name="mic" size={14}/><span>Audio</span></button>
+          <button disabled={!selectedClipIds.length} onClick={lift} title="Remove selected clips and leave a gap"><Icon name="trash" size={14}/><span>Lift</span></button>
+          <button disabled={!selectedClipIds.length} onClick={rippleDelete} title="Delete selected clips and close the gap"><Icon name="arrow" size={14}/><span>Ripple delete</span></button>
+          <button className={rippleAll?'active subtle-active':''} onClick={()=>setRippleAll(value=>!value)} title="Ripple every unlocked track or targeted tracks only"><Icon name="target" size={14}/><span>{rippleAll?'All tracks':'Targets only'}</span></button>
+          <button disabled={selectedClipIds.length<2} onClick={groupSelection} title="Group selected clips"><Icon name="layers" size={14}/><span>Group</span></button>
+          <button disabled={!selectedClipIds.length} onClick={ungroupSelection} title="Ungroup selected clips"><Icon name="x" size={14}/><span>Ungroup</span></button>
+          <button className={snapping?'active subtle-active':''} onClick={()=>setSnapping(value=>!value)} title="Snapping (N). Hold Alt during a gesture to bypass"><Icon name="magnet" size={14}/><span>Snap</span><kbd>N</kbd></button>
+        </div>
+        <div className="dock-status">
+          <span>{interaction!=='idle'?interaction.replace('-', ' '):selectedClipIds.length?`${selectedClipIds.length} selected`:'Ready'}</span>
+          <small>{toolHint[tool]}</small>
+        </div>
+      </div>
+      <header className="timeline-topbar">
+        <div className="timeline-topbar-left">
+          <div className="timeline-topbar-group">
+            <button onClick={()=>seek(0)} title="Go to start">↤</button>
+            <button onClick={togglePlayback} title={playing?'Pause playback':'Play sequence'}><Icon name={playing?'pause':'play'} size={14}/></button>
+            <span className="timeline-timecode">{formatTimecode(playhead)}</span>
+          </div>
+          <div className="timeline-topbar-group">
+            <button className="marker-button" onClick={addTimelineMarker} title="Add a marker at the playhead"><Icon name="marker" size={14}/> Marker</button>
+            <button disabled={!selectedClipIds.length} onClick={()=>{setSelectedClipId(null);setSelectedClipIds([])}} title="Clear the current selection">Clear selection</button>
+          </div>
+          <span className="timeline-tool-hint">{toolHint[tool]}</span>
+        </div>
+        <div className="timeline-topbar-right">
+          <span className="timeline-fps">25 FPS</span>
+          <button onClick={fitTimeline} title="Fit the whole sequence in view"><Icon name="expand" size={14}/> Fit</button>
+          <div className="zoom-controls">
+            <button onClick={()=>setZoom(Math.max(8,zoom-4))} title="Zoom out">−</button>
+            <input type="range" min="8" max="80" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/>
+            <button onClick={()=>setZoom(Math.min(80,zoom+4))} title="Zoom in">+</button>
+          </div>
+          <span className="zoom-readout">{zoom}px/s</span>
+        </div>
+      </header>
+      <div className={`timeline-scroll tool-${tool} interaction-${interaction}`} ref={timelineScrollRef} onWheel={handleTimelineWheel}>
+        <div className="timeline-rack" style={{width:canvasWidth+155}}>
+          <div className="timeline-ruler-pro" style={{width:canvasWidth,marginLeft:155}} onPointerDown={tool==='hand'?beginTimelinePan:beginScrub}>
+            {Array.from({length:Math.ceil(canvasDuration/5)+1},(_,index)=>index*5).map(time=><i key={time} style={{left:time*zoom}}><span>{formatPrecise(time)}</span></i>)}
+            {project.timelineMarkers.map(marker=><button key={marker.id} style={{left:marker.time*zoom,background:marker.color}} title={marker.label} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();seek(marker.time)}}/>)}
+          </div>
+          {tracks.map(track=><div className={`timeline-track-pro track-${track.kind} ${track.locked?'locked':''} ${track.targeted?'targeted':''}`} key={track.id}>
+            <div className="track-head"><span style={{background:track.color}}/><b>{track.label}</b><div>
+              <button className={track.targeted?'on':''} onClick={()=>updateTrack(track.id,{targeted:!track.targeted})} title="Target this track for blade and ripple edits"><Icon name="target" size={13}/></button>
+              <button className={track.syncLocked?'on':''} onClick={()=>updateTrack(track.id,{syncLocked:!track.syncLocked})} title="Keep linked picture and sound in sync"><Icon name="sync" size={13}/></button>
+              <button className={track.hidden?'off':''} onClick={()=>updateTrack(track.id,{hidden:!track.hidden})} title="Show or hide"><Icon name="visible" size={13}/></button>
+              <button className={track.muted?'off':''} onClick={()=>updateTrack(track.id,{muted:!track.muted})} title="Mute"><Icon name="mute" size={13}/></button>
+              <button className={track.locked?'on':''} onClick={()=>updateTrack(track.id,{locked:!track.locked})} title="Lock"><Icon name="lock" size={13}/></button>
+            </div></div>
+            <div className="track-lane" data-track-id={track.id} style={{width:canvasWidth}} onDragOver={e=>e.preventDefault()} onDrop={e=>handleDrop(e,track)} onPointerDown={e=>{if(e.target!==e.currentTarget)return;if(tool==='hand'){beginTimelinePan(e);return}setPlaying(false);seek((e.clientX-e.currentTarget.getBoundingClientRect().left)/zoom);if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey){setSelectedClipId(null);setSelectedClipIds([])}}}>
+              {project.timelineClips.filter(clip=>clip.trackId===track.id).sort((a,b)=>a.timelineStart-b.timelineStart).map(clip=>{const asset=assetFor(clip),bars=(asset?.waveform||waveformPattern(clip.name,48)).slice(0,48),selected=selectedClipIds.includes(clip.id);return <div key={clip.id} className={`timeline-clip clip-${clip.type} ${selected?'selected':''} ${draggingClipId===clip.id?'dragging':''} ${trimmingClipId===clip.id?'trimming':''} ${clip.groupId?'grouped':''} ${clip.linkGroupId?'linked-av':''} ${bladePreview?.clipId===clip.id?'blade-hover':''}`} style={{left:clip.timelineStart*zoom,width:Math.max(28,clip.duration*zoom),borderColor:track.color}}>
+                <button className="trim-handle trim-left" aria-label={`Trim start of ${clip.name}`} title="Trim start · removes the section before this edge" onPointerDown={e=>beginTrim(e,clip,'start')}><span/><em>‹</em></button>
+                <button className="clip-move-zone" onPointerDown={e=>tool==='hand'?beginTimelinePan(e):beginMove(e,clip)} onPointerMove={e=>updateBladePreview(e,clip)} onPointerLeave={()=>{if(tool==='blade'&&bladePreview?.clipId===clip.id)setBladePreview(null)}} onClick={e=>{e.stopPropagation();if(tool==='hand'||suppressTimelineClick.current)return;const lane=e.currentTarget.closest<HTMLElement>('[data-track-id]');if(!lane)return;const time=frameSnap((e.clientX-lane.getBoundingClientRect().left)/zoom);if(tool==='blade'){bladeAt(clip,time,e.shiftKey);setBladePreview(null)}else{selectClip(clip.id,e.shiftKey||e.ctrlKey||e.metaKey);seek(time)}}}>
+                  {(clip.type==='video'||clip.type==='image')&&asset?.posterUrl&&<span className="clip-filmstrip" style={{backgroundImage:`url(${asset.posterUrl})`}}/>}
+                  {clip.type==='image'&&asset?.url&&!asset.posterUrl&&<span className="clip-filmstrip" style={{backgroundImage:`url(${asset.url})`}}/>}
+                  {clip.type==='audio'&&<span className="clip-waveform">{bars.map((bar,index)=><i key={index} style={{height:`${Math.max(12,bar*94)}%`}}/>)}</span>}
+                  <span className="clip-kind">{clip.type==='audio'?'≋':clip.type==='title'?'T':'▧'}</span><b>{clip.name}</b><small>{formatTimecode(clip.duration)}</small>{clip.linkGroupId&&<em className="clip-link">⌁</em>}{clip.groupId&&<em className="clip-group">G</em>}
+                </button>
+                <button className="trim-handle trim-right" aria-label={`Trim end of ${clip.name}`} title="Trim end · removes the section after this edge" onPointerDown={e=>beginTrim(e,clip,'end')}><span/><em>›</em></button>
+              </div>})}
+            </div>
+          </div>)}
+          {snapGuide!==null&&<div className="timeline-snap-guide" style={{left:155+snapGuide*zoom}}><span>SNAP · {formatPrecise(snapGuide)}</span></div>}
+          {bladePreview&&<div className="timeline-blade-guide" style={{left:155+bladePreview.time*zoom}}><span>✂ {formatTimecode(bladePreview.time)}</span></div>}
+          {dragReadout!==null&&<div className={`timeline-drag-readout ${interaction.startsWith('trim')?'trim-readout':''}`} style={{left:155+dragReadout*zoom}}><b>{interaction.startsWith('trim')?'TRIM':'MOVE'}</b><span>{formatTimecode(dragReadout)}</span>{dragDelta!==null&&<em>{dragDelta>=0?'+':'−'}{formatTimecode(Math.abs(dragDelta))}</em>}</div>}
+          <div className="timeline-playhead" style={{left:155+playhead*zoom}}><span>{formatTimecode(playhead)}</span></div>
+        </div>
+      </div>
     </section>
     <input ref={importInput} className="visually-hidden" type="file" multiple accept="video/*,image/*,audio/*" onChange={e=>{if(e.target.files)addResourceFiles(e.target.files,setProject,notify);e.target.value=''}}/>
     <input ref={proxyInput} className="visually-hidden" type="file" accept="video/*" onChange={e=>{attachProxy(e.target.files?.[0]);e.target.value=''}}/>
-    {showShortcuts&&<div className="shortcut-popover"><header><b>Rough-cut shortcuts</b><button onClick={()=>setShowShortcuts(false)}><Icon name="x"/></button></header><div><span><kbd>Space</kbd> Play / pause</span><span><kbd>← / →</kbd> One frame</span><span><kbd>Shift ←</kbd> One second</span><span><kbd>V</kbd> Select tool</span><span><kbd>B</kbd> Blade tool</span><span><kbd>S</kbd> Split linked clip</span><span><kbd>Ctrl click</kbd> Multi-select</span><span><kbd>G</kbd> Group selection</span><span><kbd>U</kbd> Ungroup</span><span><kbd>Delete</kbd> Lift</span><span><kbd>Shift Delete</kbd> Ripple delete</span><span><kbd>Ctrl Z</kbd> Undo</span></div></div>}
+    {showShortcuts&&<div className="shortcut-popover"><header><b>Rough-cut shortcuts</b><button onClick={()=>setShowShortcuts(false)}><Icon name="x"/></button></header><div><span><kbd>Space</kbd> Play / pause</span><span><kbd>← / →</kbd> One frame</span><span><kbd>Shift ←</kbd> One second</span><span><kbd>A / V</kbd> Selection tool</span><span><kbd>T</kbd> Trim tool</span><span><kbd>B</kbd> Blade tool</span><span><kbd>H</kbd> Hand tool</span><span><kbd>N</kbd> Toggle snapping</span><span><kbd>Alt drag</kbd> Ignore snapping</span><span><kbd>Esc</kbd> Cancel active gesture</span><span><kbd>Shift click</kbd> Blade targeted tracks</span><span><kbd>S</kbd> Split linked clip</span><span><kbd>E</kbd> Extract audio</span><span><kbd>Ctrl click</kbd> Multi-select</span><span><kbd>G</kbd> Group selection</span><span><kbd>U</kbd> Ungroup</span><span><kbd>Delete</kbd> Lift</span><span><kbd>Shift Delete</kbd> Ripple delete</span><span><kbd>Ctrl Z</kbd> Undo</span></div></div>}
     <StageFooter note="Next: export the organised edit decisions, captions and media relink report for Resolve." onNext={onNext} label="Prepare Resolve handoff"/>
   </div>
 }
@@ -1384,7 +1544,7 @@ async function createResolveZip(project:Project){
   zip.file('01_Project/project-summary.json',JSON.stringify({title:project.title,series:project.series,format:project.format,premise:project.premise,viewer:project.viewer,outcome:project.outcome,targetMinutes:project.targetMinutes},null,2))
   zip.file('02_Scripts/clean-script.txt',script)
   zip.file('03_Captions/captions.srt',srt)
-  zip.file('04_Resolve_Import/sequence-manifest.json',JSON.stringify({version:4,fps:EDIT_FPS,duration:sequenceDuration,tracks:project.timelineTracks,clips:project.timelineClips.map(clip=>({...clip,assetName:project.resources.find(asset=>asset.id===clip.assetId)?.name,proxyName:project.resources.find(asset=>asset.id===clip.assetId)?.proxyName,trackName:project.timelineTracks.find(track=>track.id===clip.trackId)?.label})),markers:project.timelineMarkers,legacyCuts:project.editCuts,legacyBroll:project.brollPlacements,transcript:project.transcript.map(t=>({sourceIn:t.start,sourceOut:t.end,included:t.included,text:t.text}))},null,2))
+  zip.file('04_Resolve_Import/sequence-manifest.json',JSON.stringify({version:7,fps:EDIT_FPS,duration:sequenceDuration,editorSettings:project.editorSettings,tracks:project.timelineTracks,clips:project.timelineClips.map(clip=>({...clip,assetName:project.resources.find(asset=>asset.id===clip.assetId)?.name,proxyName:project.resources.find(asset=>asset.id===clip.assetId)?.proxyName,trackName:project.timelineTracks.find(track=>track.id===clip.trackId)?.label})),markers:project.timelineMarkers,legacyCuts:project.editCuts,legacyBroll:project.brollPlacements,transcript:project.transcript.map(t=>({sourceIn:t.start,sourceOut:t.end,included:t.included,text:t.text}))},null,2))
   zip.file('04_Resolve_Import/rough-cut.fcpxml',createFcpxml(project))
   zip.file('04_Resolve_Import/rough-cut.edl',createEdl(project))
   zip.file('04_Resolve_Import/timeline-markers.csv',timelineMarkers)

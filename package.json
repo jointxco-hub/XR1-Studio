@@ -1,12 +1,13 @@
 {
   "name": "x1-content-studio",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.13.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test:timeline": "node --experimental-strip-types --test tests/timelineOperations.test.ts"
   },
   "dependencies": {
     "jszip": "^3.10.1",
