@@ -1,4 +1,12 @@
-# X1 Content Studio
+# XR1 Studio
+
+## v0.14 — Capture Ready
+
+XR1 is a local-first Joint X content production studio built around the phone workflow: script a section, record it with an eye-line teleprompter, compare durable takes, send preferred takes to Files and Quick Edit, then continue toward Resolve and publishing.
+
+Recording media is stored in IndexedDB on the current device, separately from lightweight project metadata. The Files workspace labels durable versus session-only media, and every completed take offers an immediate Save to device action. Browser storage is not a cloud backup; export irreplaceable footage to Photos/Files.
+
+Run the full quality gate with `npm test` and `npm run build`.
 
 Version 0.12 — aligned editor workspace, timeline-mounted professional tools, standard and ripple trimming, and clearer edit controls
 

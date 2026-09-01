@@ -1,0 +1,15 @@
+{
+  "name": "XR1 Studio",
+  "short_name": "XR1",
+  "description": "Joint X mobile-first content production studio.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0d0c",
+  "theme_color": "#0d0d0c",
+  "icons": [
+    {"src":"/xr1-icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/xr1-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

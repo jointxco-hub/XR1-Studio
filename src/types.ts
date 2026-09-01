@@ -38,11 +38,19 @@ export type TranscriptLine = {
 
 export type Take = {
   id: string
+  projectId?: string
+  scriptBlockId?: string
+  assetId?: string
   section: string
   label: string
   duration: string
+  durationSeconds?: number
   preferred: boolean
   url?: string
+  createdAt?: string
+  cameraLabel?: string
+  microphoneLabel?: string
+  mime?: string
 }
 
 export type ResourceAsset = {
@@ -60,6 +68,13 @@ export type ResourceAsset = {
   tags: string[]
   role: 'A-roll' | 'B-roll' | 'Thumbnail' | 'Audio' | 'Document' | 'Unassigned'
   duration?: number
+  storageKey?: string
+  persistence?: 'saving' | 'durable' | 'ephemeral' | 'failed'
+  recorded?: boolean
+  projectId?: string
+  scriptBlockId?: string
+  cameraLabel?: string
+  microphoneLabel?: string
 }
 
 export type EditCut = {
@@ -157,6 +172,7 @@ export type Project = {
   timelineClips: TimelineClip[]
   timelineMarkers: TimelineMarker[]
   editorSettings: EditorSettings
+  updatedAt?: string
   publish: {
     title: string
     description: string

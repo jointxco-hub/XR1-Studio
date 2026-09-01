@@ -3,6 +3,8 @@ import JSZip from 'jszip'
 import { defaultTimelineTracks, stageMeta, starterProject } from './data'
 import type { BrollPlacement, EditCut, Project, ResourceAsset, ScriptBlock, Shot, StageId, Take, TimelineClip, TimelineMarker, TimelineTrack, TranscriptLine } from './types'
 import { linkedClipIds as getLinkedClipIds, trimTimelineClips } from './timelineOperations'
+import { CaptureStage } from './features/recording/CaptureStage'
+import { deleteMedia, loadMedia, persistMedia } from './lib/mediaStorage'
 
 type IconName =
   | 'arrow' | 'brief' | 'camera' | 'check' | 'chevron' | 'copy' | 'download'
@@ -246,6 +248,7 @@ function makeBlankProject(format = 'Founder breakdown'):Project{
 }
 
 function useProjectStore() {
+  const [saveState,setSaveState]=useState<'saving'|'saved'|'failed'>('saved')
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
       const saved = localStorage.getItem('x1-content-studio-projects')
@@ -284,6 +287,7 @@ function useProjectStore() {
   }
   const saveTimer=useRef<number|null>(null)
   useEffect(() => {
+    setSaveState('saving')
     if(saveTimer.current)window.clearTimeout(saveTimer.current)
     saveTimer.current=window.setTimeout(()=>{
       try{
@@ -291,42 +295,51 @@ function useProjectStore() {
         localStorage.setItem('x1-content-studio-projects', persistent)
         localStorage.setItem('x1-content-studio-active', activeId)
         localStorage.setItem('x1-content-studio-project', JSON.stringify(project,(key,value)=>key==='url'||key==='proxyUrl'||key==='thumbnailUrl'?undefined:value))
-      }catch{/* Keep the app usable when browser storage is blocked. */}
+        setSaveState('saved')
+      }catch{setSaveState('failed')}
     },300)
     return()=>{if(saveTimer.current)window.clearTimeout(saveTimer.current)}
   }, [projects, activeId, project])
-  return { project, setProject, projects, setActiveId, createProject, importBlueprint, deleteProject }
+  return { project, setProject, projects, setActiveId, createProject, importBlueprint, deleteProject, saveState }
 }
 
 function App() {
   const search = new URLSearchParams(location.search)
   if (search.get('prompter') === '1') return <StandalonePrompter />
 
-  const { project, setProject, projects, setActiveId, createProject, importBlueprint, deleteProject } = useProjectStore()
+  const { project, setProject, projects, setActiveId, createProject, importBlueprint, deleteProject, saveState } = useProjectStore()
   const [stage, setStage] = useState<StageId>('idea')
   const [resourcesOpen, setResourcesOpen] = useState(false)
   const [home, setHome] = useState(false)
   const [toast, setToast] = useState('')
+  const [recordBlockId,setRecordBlockId]=useState<string|undefined>()
+  const [mobileMore,setMobileMore]=useState(false)
+  const hydratedProjects=useRef(new Set<string>())
+  const historyInitialised=useRef(false),historyNavigation=useRef(false)
   useEffect(()=>{window.scrollTo(0,0)},[stage])
+  useEffect(()=>{const onPop=(event:PopStateEvent)=>{historyNavigation.current=true;if(event.state?.home){historyNavigation.current=false;setHome(true);return}setHome(false);const next=(event.state?.stage||location.hash.slice(1)) as StageId;if([...stageMeta.map(item=>item.id),'files'].includes(next))setStage(next);else historyNavigation.current=false};addEventListener('popstate',onPop);return()=>removeEventListener('popstate',onPop)},[])
+  useEffect(()=>{if(historyNavigation.current){historyNavigation.current=false;return}const state={stage};if(historyInitialised.current)history.pushState(state,'',`#${stage}`);else{history.replaceState(state,'',`#${stage}`);historyInitialised.current=true}},[stage])
+  useEffect(()=>{if(hydratedProjects.current.has(project.id))return;hydratedProjects.current.add(project.id);void Promise.all(project.resources.filter(asset=>asset.storageKey&&!asset.url).map(async asset=>{try{const stored=await loadMedia(asset.storageKey!);if(!stored)return;const url=URL.createObjectURL(stored.blob);setProject(current=>({...current,resources:current.resources.map(item=>item.id===asset.id?{...item,url,persistence:'durable'}:item),takes:current.takes.map(take=>take.assetId===asset.id?{...take,url}:take)}))}catch{/* Metadata remains visible for recovery. */}}))},[project.id])
 
   const notify = (message: string) => {
     setToast(message)
     window.setTimeout(() => setToast(''), 2400)
   }
   const setPartial = (update: Partial<Project>) => setProject(p => ({ ...p, ...update }))
+  const openHome=()=>{history.pushState({home:true},'','#home');setHome(true)}
 
-  if (home) return <Dashboard projects={projects} activeId={project.id} onDelete={deleteProject} onOpen={id => { setActiveId(id); setHome(false) }} onNew={format => {
+  if (home) return <Dashboard projects={projects} activeId={project.id} onDelete={deleteProject} onOpen={(id,target) => { setActiveId(id); setStage(target||'idea'); setHome(false) }} onNew={format => {
     createProject(format); setStage('idea'); setHome(false)
   }} onImport={markdown=>{importBlueprint(markdown);setStage('script');setHome(false)}} />
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setHome(true)} aria-label="Open projects">
+        <button className="brand" onClick={openHome} aria-label="Open projects">
           <span className="brand-mark">X1</span>
           <span><b>Content Studio</b><small>From idea to finished story</small></span>
         </button>
-        <button className="back-projects" onClick={() => setHome(true)}><Icon name="home" size={16}/> All projects</button>
+        <button className="back-projects" onClick={openHome}><Icon name="home" size={16}/> All projects</button>
         <button className={stage === 'files' ? 'back-projects files-link active' : 'back-projects files-link'} onClick={() => setStage('files')}><Icon name="folder" size={16}/> Files</button>
         <nav className="stage-nav" aria-label="Production stages">
           {stageMeta.map((item, index) => {
@@ -348,29 +361,37 @@ function App() {
         <header className="topbar">
           <div className="project-crumb"><span>{project.series}</span><Icon name="chevron" size={13}/><b>{project.title}</b></div>
           <div className="top-actions">
-            <span className="save-state"><Icon name="check" size={14}/> Saved</span>
+            <span className={`save-state save-${saveState}`}>{saveState==='saving'?'Saving…':saveState==='failed'?'Save failed':'Saved'}</span>
             <button className="icon-button" onClick={() => setResourcesOpen(true)} title="Project resources"><Icon name="folder"/></button>
             <button className="avatar">JX</button>
           </div>
         </header>
         <div className="stage-content">
           {stage === 'idea' && <IdeaStage project={project} setPartial={setPartial} onNext={() => setStage('script')} />}
-          {stage === 'script' && <ScriptStage project={project} setProject={setProject} onNext={() => setStage('visuals')} notify={notify} />}
+          {stage === 'script' && <ScriptStage project={project} setProject={setProject} onNext={() => setStage('visuals')} notify={notify} onRecord={id=>{setRecordBlockId(id);setStage('record')}} />}
           {stage === 'visuals' && <StudioBoardStage project={project} setProject={setProject} notify={notify} onNext={() => setStage('record')} />}
-          {stage === 'record' && <RecordStage project={project} setProject={setProject} notify={notify} onNext={() => setStage('edit')} />}
+          {stage === 'record' && <CaptureStage project={project} setProject={setProject} notify={notify} onNext={() => setStage('edit')} initialBlockId={recordBlockId} />}
           {stage === 'edit' && <StudioEditorStage project={project} setProject={setProject} notify={notify} onNext={() => setStage('finish')} />}
           {stage === 'finish' && <FinishStage project={project} notify={notify} onNext={() => setStage('publish')} />}
           {stage === 'publish' && <PublishStage project={project} setProject={setProject} notify={notify} />}
           {stage === 'files' && <FilesStage project={project} setProject={setProject} notify={notify} />}
         </div>
       </main>
+      <nav className="mobile-nav" aria-label="Mobile production navigation">
+        <button onClick={openHome}><Icon name="home"/><span>Home</span></button>
+        <button className={stage==='script'?'active':''} onClick={()=>setStage('script')}><Icon name="edit"/><span>Script</span></button>
+        <button className={stage==='record'?'active mobile-record-tab':''} onClick={()=>setStage('record')}><Icon name="record"/><span>Record</span></button>
+        <button className={stage==='edit'?'active':''} onClick={()=>setStage('edit')}><Icon name="scissors"/><span>Edit</span></button>
+        <button className={mobileMore?'active':''} onClick={()=>setMobileMore(value=>!value)}><Icon name="more"/><span>More</span></button>
+      </nav>
+      {mobileMore&&<div className="mobile-more-layer" onClick={event=>{if(event.target===event.currentTarget)setMobileMore(false)}}><section><header><div><b>{project.title}</b><small>Choose a production stage</small></div><button onClick={()=>setMobileMore(false)}><Icon name="x"/></button></header>{stageMeta.filter(item=>!['script','record','edit'].includes(item.id)).map(item=><button className={stage===item.id?'active':''} key={item.id} onClick={()=>{setStage(item.id);setMobileMore(false)}}><span>{item.number}</span><div><b>{item.label}</b><small>{item.hint}</small></div><Icon name="arrow"/></button>)}<button className={stage==='files'?'active':''} onClick={()=>{setStage('files');setMobileMore(false)}}><Icon name="folder"/><div><b>Files</b><small>Project media and takes</small></div><Icon name="arrow"/></button></section></div>}
       {resourcesOpen && <ResourcesDrawer project={project} setProject={setProject} onClose={() => setResourcesOpen(false)} notify={notify} />}
       {toast && <div className="toast"><Icon name="check" size={16}/>{toast}</div>}
     </div>
   )
 }
 
-function Dashboard({ projects, activeId, onOpen, onNew, onImport, onDelete }: { projects: Project[]; activeId:string; onOpen: (id:string) => void; onNew: (format?:string) => void; onImport:(markdown:string)=>void; onDelete:(id:string)=>void }) {
+function Dashboard({ projects, activeId, onOpen, onNew, onImport, onDelete }: { projects: Project[]; activeId:string; onOpen: (id:string,stage?:StageId) => void; onNew: (format?:string) => void; onImport:(markdown:string)=>void; onDelete:(id:string)=>void }) {
   const blueprintInput=useRef<HTMLInputElement>(null)
   const [showAll,setShowAll]=useState(false)
   const [pendingImport,setPendingImport]=useState<{markdown:string;fileName:string;summary:BlueprintSummary}|null>(null)
@@ -396,14 +417,15 @@ function Dashboard({ projects, activeId, onOpen, onNew, onImport, onDelete }: { 
         <div><span className="pulse-number">{String(active?.targetMinutes||0).padStart(2,'0')}m</span><span><b>Target runtime</b><small>Current project</small></span></div>
       </div>
       <section className="dash-section"><div className="section-heading"><h2>{showAll?'All projects':'Continue working'}</h2><button onClick={()=>setShowAll(v=>!v)}>{showAll?'Show current':'View all'}</button></div>
-        <div className={showAll?'all-projects-grid':''}>{cards.map((project,index)=><article className="project-card" key={project.id}>
+        <div className={showAll?'all-projects-grid':''}>{cards.map((project,index)=>{const nextStage:StageId=project.timelineClips.length?'edit':project.takes.length?'edit':project.blocks.some(block=>block.text.trim())?'record':'script';return <article className="project-card" key={project.id}>
           <button className="project-card-open" onClick={()=>onOpen(project.id)}>
             <div className="project-cover"><span>{project.series.toUpperCase().split(' ').slice(0,2).map(x=><span key={x}>{x}<br/></span>)}</span><small>JOINT X / {String(index+1).padStart(3,'0')}</small></div>
-            <div className="project-info"><span className="project-status"><i/> IN PRODUCTION</span><h3>{project.title}</h3><p>{project.premise||'Open the project and find its strongest promise.'}</p><div className="progress"><i style={{width: `${Math.min(95,25+project.resources.length*7+project.blocks.filter(b=>b.text).length*5)}%`}}/></div><div className="project-meta"><span>{project.resources.length} files · {project.blocks.length} story beats</span><span>Saved locally</span></div></div>
+            <div className="project-info"><span className="project-status"><i/> {nextStage.toUpperCase()} NEXT</span><h3>{project.title}</h3><p>{project.premise||'Open the project and find its strongest promise.'}</p><div className="progress"><i style={{width: `${Math.min(95,25+project.resources.length*7+project.blocks.filter(b=>b.text).length*5)}%`}}/></div><div className="project-meta"><span>{project.resources.length} files · {project.blocks.length} story beats</span><span>Saved locally</span></div></div>
             <span className="round-arrow"><Icon name="arrow"/></span>
           </button>
           <button className="project-delete" onClick={()=>removeProject(project)} title={`Delete ${project.title}`} aria-label={`Delete ${project.title}`}><Icon name="trash" size={15}/></button>
-        </article>)}</div>
+          <div className="project-quick-actions"><button onClick={()=>onOpen(project.id,nextStage)}>Continue</button><button onClick={()=>onOpen(project.id,'record')}>Record now</button><button onClick={()=>onOpen(project.id,'script')}>Script</button><button onClick={()=>onOpen(project.id,'edit')}>Edit</button></div>
+        </article>})}</div>
       </section>
       <section className="dash-section"><div className="section-heading"><h2>Start with a format</h2></div>
         <div className="template-grid">
@@ -453,7 +475,7 @@ function IdeaStage({ project, setPartial, onNext }: { project: Project; setParti
   </>
 }
 
-function ScriptStage({ project, setProject, onNext, notify }: { project: Project; setProject: React.Dispatch<React.SetStateAction<Project>>; onNext: () => void; notify: (s: string) => void }) {
+function ScriptStage({ project, setProject, onNext, notify, onRecord }: { project: Project; setProject: React.Dispatch<React.SetStateAction<Project>>; onNext: () => void; notify: (s: string) => void; onRecord:(blockId:string)=>void }) {
   const [menuId, setMenuId] = useState<string | null>(null)
   const [toolbarMenu, setToolbarMenu] = useState(false)
   const [focusWriter,setFocusWriter]=useState(false)
@@ -471,7 +493,7 @@ function ScriptStage({ project, setProject, onNext, notify }: { project: Project
       {project.blocks.map((block, index) => <article className="script-block" key={block.id}>
         <div className="block-index"><span>{String(index+1).padStart(2,'0')}</span><i/></div>
         <div className="block-body">
-          <div className="block-top"><input className="block-title" value={block.label} onChange={e => updateBlock(block.id,{label:e.target.value})}/><span>{block.text.trim().split(/\s+/).filter(Boolean).length} words</span></div>
+          <div className="block-top"><input className="block-title" value={block.label} onChange={e => updateBlock(block.id,{label:e.target.value})}/><span>{block.text.trim().split(/\s+/).filter(Boolean).length} words</span><button className="record-section" onClick={()=>onRecord(block.id)}><Icon name="record" size={13}/> Record this section</button></div>
           <textarea value={block.text} onChange={e => updateBlock(block.id,{text:e.target.value})} placeholder="What do you need to say here?" />
           <div className="block-notes">
             <label><Icon name="mic" size={14}/><input value={block.note} onChange={e => updateBlock(block.id,{note:e.target.value})} placeholder="Private delivery note"/></label>
@@ -843,6 +865,7 @@ type TimelineInteraction='idle'|'move'|'trim-start'|'trim-end'|'scrub'|'pan'
 const EDIT_FPS=25
 
 function StudioEditorStage({project,setProject,notify,onNext}:{project:Project;setProject:React.Dispatch<React.SetStateAction<Project>>;notify:(s:string)=>void;onNext:()=>void}){
+  const [editMode,setEditMode]=useState<'quick'|'advanced'>(()=>matchMedia('(max-width: 820px)').matches?'quick':'advanced')
   const [bin,setBin]=useState<'media'|'shots'|'transcript'>('media')
   const [mediaSearch,setMediaSearch]=useState('')
   const [tool,setTool]=useState<TimelineTool>('select')
@@ -1109,8 +1132,8 @@ function StudioEditorStage({project,setProject,notify,onNext}:{project:Project;s
   useEffect(()=>{const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&cancelGestureRef.current){event.preventDefault();cancelGestureRef.current();return}if((event.target as HTMLElement)?.matches('input,textarea,select'))return;if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();return}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();setSelectedClipIds(project.timelineClips.map(clip=>clip.id));setSelectedClipId(project.timelineClips[0]?.id||null);return}if(event.code==='Space'){event.preventDefault();togglePlayback()}else if(event.key.toLowerCase()==='s'&&selectedClip)splitClip(selectedClip);else if(event.key.toLowerCase()==='e'&&selectedClip?.type==='video')extractAudio(selectedClip);else if(event.key.toLowerCase()==='g')groupSelection();else if(event.key.toLowerCase()==='u')ungroupSelection();else if(event.key==='Delete'&&event.shiftKey)rippleDelete();else if(event.key==='Delete'||event.key==='Backspace')lift();else if(event.key.toLowerCase()==='b')setTool('blade');else if(event.key.toLowerCase()==='t')setTool('trim');else if(event.key.toLowerCase()==='h')setTool('hand');else if(event.key.toLowerCase()==='a'||event.key.toLowerCase()==='v')setTool('select');else if(event.key.toLowerCase()==='n')setSnapping(value=>!value);else if(event.key==='ArrowLeft')seek(playhead-(event.shiftKey?1:frame));else if(event.key==='ArrowRight')seek(playhead+(event.shiftKey?1:frame))};addEventListener('keydown',key);return()=>removeEventListener('keydown',key)},[selectedClipId,selectedClipIds,playhead,undoStack,redoStack,project.timelineClips,rippleAll])
   const exportPlan=()=>downloadText(`${project.title.replace(/[^a-z0-9]+/gi,'-')}-sequence.json`,JSON.stringify({version:7,fps:EDIT_FPS,duration:sequenceDuration,editorSettings:project.editorSettings,tracks:project.timelineTracks,clips:project.timelineClips.map(clip=>({...clip,assetName:assetFor(clip)?.name})),markers:project.timelineMarkers},null,2))
 
-  return <div className="studio-editor">
-    <StageHeader index="05" eyebrow="ROUGH CUT" title="Shape the sequence." copy="Layer picture and sound independently, transform clips, trim precisely, and keep the edit workspace clean, stable and smooth for Resolve." action={<div className="runtime"><span>{formatPrecise(sequenceDuration)}</span><small>{project.timelineClips.length} CLIPS · {project.timelineMarkers.length} MARKERS</small></div>}/>
+  return <div className={`studio-editor ${editMode}-mode`}>
+    <StageHeader index="05" eyebrow={editMode==='quick'?'QUICK EDIT':'ADVANCED EDIT'} title="Shape the sequence." copy={editMode==='quick'?'Choose takes, trim mistakes, add B-roll and captions, then preview the rough cut.':'Layer picture and sound independently, transform clips, trim precisely, and prepare the sequence for Resolve.'} action={<div className="edit-mode-actions"><div className="mode-switch"><button className={editMode==='quick'?'active':''} onClick={()=>setEditMode('quick')}>Quick Edit</button><button className={editMode==='advanced'?'active':''} onClick={()=>setEditMode('advanced')}>Advanced</button></div><div className="runtime"><span>{formatPrecise(sequenceDuration)}</span><small>{project.timelineClips.length} CLIPS · {project.timelineMarkers.length} MARKERS</small></div></div>}/>
     <div className="editor-utilitybar panel">
       <div className="utilitybar-copy"><span>EDIT WORKSPACE</span><b>Picture, sound and sequence settings</b><small>Primary editing tools are docked directly above the timeline.</small></div>
       <div className="utilitybar-actions">
@@ -1389,6 +1412,8 @@ function FilesStage({project,setProject,notify}:{project:Project;setProject:Reac
   const addInput=useRef<HTMLInputElement>(null),relinkInput=useRef<HTMLInputElement>(null)
   const visible=project.resources.filter(file=>(filter==='All'||file.category===filter)&&(role==='All'||file.role===role)&&`${file.name} ${file.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase()))
   const updateAsset=(id:string,update:Partial<ResourceAsset>)=>setProject(p=>({...p,resources:p.resources.map(r=>r.id===id?{...r,...update}:r)}))
+  const addAssetToEdit=(file:ResourceAsset)=>{const start=Math.max(0,...project.timelineClips.map(clip=>clip.timelineStart+clip.duration)),duration=file.duration||5,type=file.category==='Audio'?'audio':file.category==='Images'?'image':'video',trackId=type==='audio'?'a1':file.role==='B-roll'?'v2':'v1';const clip:TimelineClip={id:makeId(),trackId,type,assetId:file.id,name:file.name,timelineStart:start,sourceIn:0,sourceOut:duration,duration,opacity:1,volume:1,fit:'Cover',scale:1,rotation:0,positionX:0,positionY:0,flipX:false,flipY:false,blendMode:'Normal'};setProject(p=>({...p,timelineClips:[...p.timelineClips,clip]}));notify(`${file.name} added to edit`)}
+  const removeAsset=(file:ResourceAsset)=>{void deleteMedia(file.storageKey||'').catch(()=>{});setProject(p=>({...p,resources:p.resources.filter(r=>r.id!==file.id),takes:p.takes.filter(t=>t.assetId!==file.id),timelineClips:p.timelineClips.filter(clip=>clip.assetId!==file.id)}))}
   const openAsset=(file:ResourceAsset)=>file.url?setPreview(file):beginRelink(file.id)
   const beginRelink=(id:string)=>{setRelinkId(id);relinkInput.current?.click()}
   const relink=(file?:File)=>{if(!file||!relinkId)return;updateAsset(relinkId,{name:file.name,mime:file.type||'application/octet-stream',category:resourceCategory(file),size:file.size,url:URL.createObjectURL(file),tags:inferTags(file.name),role:inferRole(file.name,resourceCategory(file))});setRelinkId(null);notify('Local file relinked for this browser session')}
@@ -1412,7 +1437,7 @@ function FilesStage({project,setProject,notify}:{project:Project;setProject:Reac
             {file.category==='Video'&&file.url?<video src={file.url} muted loop preload="metadata" onMouseEnter={e=>e.currentTarget.play().catch(()=>{})} onMouseLeave={e=>{e.currentTarget.pause();e.currentTarget.currentTime=0}}/>:file.category==='Images'&&file.url?<img src={file.url} alt=""/>:<span className="media-placeholder"><Icon name={file.category==='Video'?'video':file.category==='Images'?'eye':file.category==='Audio'?'mic':'file'} size={29}/><small>{file.url?'Open preview':'Relink to preview'}</small></span>}
             {file.category==='Video'&&file.url&&<span className="hover-play"><Icon name="play"/> Hover preview</span>}
           </button>
-          <div className="media-info"><div><span className={`role-badge role-${file.role.toLowerCase().replaceAll(' ','-')}`}>{file.role}</span><b title={file.name}>{file.name}</b><small>{file.category} · {formatBytes(file.size)}</small></div><span className="menu-wrap"><button onClick={()=>setMenuId(menuId===file.id?null:file.id)} aria-label={`More options for ${file.name}`}><Icon name="more"/></button>{menuId===file.id&&<ActionMenu align="up" items={[{label:'Preview / relink',icon:'eye',action:()=>openAsset(file)},{label:'Use as B-roll',icon:'video',action:()=>updateAsset(file.id,{role:'B-roll'})},{label:'Use as thumbnail',icon:'camera',action:()=>updateAsset(file.id,{role:'Thumbnail'})},{label:'Remove reference',icon:'trash',danger:true,action:()=>setProject(p=>({...p,resources:p.resources.filter(r=>r.id!==file.id)}))}]} onClose={()=>setMenuId(null)}/>}</span></div>
+          <div className="media-info"><div><span className={`role-badge role-${file.role.toLowerCase().replaceAll(' ','-')}`}>{file.role}</span><b title={file.name}>{file.name}</b><small>{file.category} · {formatBytes(file.size)} · {file.persistence==='durable'?'Durable on device':file.recorded?'Save to device':'Local reference'}</small></div><span className="menu-wrap"><button onClick={()=>setMenuId(menuId===file.id?null:file.id)} aria-label={`More options for ${file.name}`}><Icon name="more"/></button>{menuId===file.id&&<ActionMenu align="up" items={[{label:'Preview / relink',icon:'eye',action:()=>openAsset(file)},{label:'Add to edit',icon:'plus',action:()=>addAssetToEdit(file),disabled:!['Video','Images','Audio'].includes(file.category)},{label:'Use as B-roll',icon:'video',action:()=>updateAsset(file.id,{role:'B-roll'})},{label:'Use as thumbnail',icon:'camera',action:()=>updateAsset(file.id,{role:'Thumbnail'})},{label:'Delete file',icon:'trash',danger:true,action:()=>removeAsset(file)}]} onClose={()=>setMenuId(null)}/>}</span></div>
           <div className="media-tags">{file.tags.slice(0,3).map(tag=><span key={tag}>{tag}</span>)}</div>
         </article>)}</div>
         {!visible.length&&<div className="files-empty"><Icon name="folder" size={30}/><h3>No files in this view.</h3><p>Add local media or clear the current filters.</p><button className="secondary" onClick={()=>addInput.current?.click()}>Choose files</button></div>}
@@ -1499,10 +1524,11 @@ function inferRole(name:string,category:ResourceAsset['category']):ResourceAsset
 function addResourceFiles(files:FileList|File[],setProject:React.Dispatch<React.SetStateAction<Project>>,notify:(s:string)=>void){
   const incoming=Array.from(files)
   if(!incoming.length)return
-  const assets:ResourceAsset[]=incoming.map(file=>{const category=resourceCategory(file);return{id:makeId(),name:file.name,mime:file.type||'application/octet-stream',category,size:file.size,addedAt:new Date().toISOString(),url:URL.createObjectURL(file),tags:inferTags(file.name),role:inferRole(file.name,category)}})
+  const assets:ResourceAsset[]=incoming.map(file=>{const category=resourceCategory(file),id=makeId();return{id,name:file.name,mime:file.type||'application/octet-stream',category,size:file.size,addedAt:new Date().toISOString(),url:URL.createObjectURL(file),tags:inferTags(file.name),role:inferRole(file.name,category),storageKey:id,persistence:'saving'}})
   setProject(p=>({...p,resources:[...p.resources,...assets.filter(asset=>!p.resources.some(existing=>existing.name===asset.name&&existing.size===asset.size))]}))
   assets.forEach((asset,index)=>{
     const file=incoming[index]
+    void persistMedia({id:asset.id,blob:file,name:asset.name,mime:asset.mime,projectId:'project-media',createdAt:asset.addedAt}).then(()=>setProject(p=>({...p,resources:p.resources.map(item=>item.id===asset.id?{...item,persistence:'durable'}:item)}))).catch(()=>setProject(p=>({...p,resources:p.resources.map(item=>item.id===asset.id?{...item,persistence:'failed'}:item)})))
     if(!asset.url||(asset.category!=='Video'&&asset.category!=='Audio'))return
     const media=document.createElement(asset.category==='Video'?'video':'audio')
     media.preload='metadata';media.src=asset.url||''
