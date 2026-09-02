@@ -1,5 +1,13 @@
 # XR1 Studio
 
+## v0.14.1 — Mobile Creator Refinement
+
+XR1 now treats the phone workflow as a focused creator loop: immersive section-by-section recording, eye-line teleprompt, immediate post-take decisions, preferred-take rough-cut building and a genuinely separate Quick Edit surface. Quick Edit shows actual clips and creator actions; Advanced Edit retains the full professional track editor.
+
+Actual sequence duration, creator clip count, playhead bounds and export duration now share one media-sequence calculation. Script estimates and the project creative goal are displayed separately. Recorded blobs remain durable in device-local IndexedDB and project/edit decisions remain in browser-local project storage.
+
+See `CHANGELOG_V0.14.1.md` for the focused release details.
+
 ## v0.14 — Capture Ready
 
 XR1 is a local-first Joint X content production studio built around the phone workflow: script a section, record it with an eye-line teleprompter, compare durable takes, send preferred takes to Files and Quick Edit, then continue toward Resolve and publishing.
@@ -79,7 +87,7 @@ The static build is written to `dist/`.
 
 ## Deliberate MVP boundaries
 
-The current transcript uses sample timestamp data; automatic speech-to-text is the next backend integration. Recorded and imported media previews exist for the current browser session and are intentionally not persisted across restarts. Reopen the Files workspace and relink the original when starting a new browser session. The second-screen window carries a complete prompt snapshot; live cross-device control requires a small realtime service. Selected files are recorded as lightweight project metadata without uploading or duplicating the originals.
+The current transcript uses sample timestamp data; automatic speech-to-text is the next backend integration. New recordings and phone imports are stored in device-local IndexedDB and restored through Files after refresh/reopen. Legacy metadata-only items or media cleared by the browser still require relinking. IndexedDB remains local device storage, not a cloud backup. The second-screen window carries a complete prompt snapshot; live cross-device control requires a small realtime service. Selected files are recorded as lightweight project metadata without uploading or duplicating the originals.
 
 The app intentionally prepares the rough cut rather than replacing DaVinci Resolve. Advanced colour, sound mixing, multicamera, motion graphics, effects, and final rendering remain in Resolve. FCPXML carries the timed layered media assembly, classic EDL remains the V1 fallback, and the sequence manifest preserves every additional relationship and decision.
 

@@ -1,7 +1,7 @@
 {
   "name": "x1-content-studio",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.14.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -9,7 +9,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:timeline": "node --experimental-strip-types --test tests/timelineOperations.test.ts",
     "test:recording": "node --experimental-strip-types --test tests/recording.test.ts",
-    "test": "npm run test:timeline && npm run test:recording"
+    "test": "npm run test:timeline && npm run test:recording && npm run test:mobile",
+    "test:mobile": "node --experimental-strip-types --test tests/mobileCreatorRefinement.test.ts tests/recordingPresentation.test.ts"
   },
   "dependencies": {
     "jszip": "^3.10.1",

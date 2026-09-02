@@ -1,4 +1,5 @@
 import type { Project, ResourceAsset, Take, TimelineClip } from '../../types'
+import { sequenceDuration } from '../editor/sequenceOperations.ts'
 
 export type CompletedTakeInput={
   id:string
@@ -34,7 +35,7 @@ export function preferredTakeClips(project:Project,startAt?:number):TimelineClip
   const takes=project.blocks.flatMap(block=>project.takes.filter(take=>take.scriptBlockId===block.id&&take.preferred&&take.assetId))
   const fallback=project.takes.filter(take=>take.preferred&&take.assetId&&!take.scriptBlockId)
   const selected=[...takes,...fallback]
-  let cursor=startAt??Math.max(0,...project.timelineClips.map(clip=>clip.timelineStart+clip.duration))
+  let cursor=startAt??sequenceDuration(project.timelineClips)
   return selected.flatMap(take=>{
     const duration=take.durationSeconds||project.resources.find(asset=>asset.id===take.assetId)?.duration||1
     const linkGroupId=`take-${take.id}`
