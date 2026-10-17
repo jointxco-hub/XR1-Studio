@@ -90,3 +90,35 @@
  .post-take button{font-size:13px}
  .project-card-open{min-width:0!important;gap:12px!important}
 }
+
+/* v0.14.5 — creator capture modes */
+.capture-mode-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.capture-mode-toolbar>div{display:flex;gap:4px;padding:4px;border:1px solid #d8dcd1;border-radius:12px;background:#fff}
+.capture-mode-toolbar button,.capture-mode-toolbar select{min-height:42px;padding:0 12px;border:1px solid #d8dcd1;border-radius:9px;background:#fff;color:#20221d;font-size:12px;font-weight:650}
+.capture-mode-toolbar>div button{border:0}
+.capture-mode-toolbar button.active{color:#182006;background:#c8ff2f}
+.capture-mode-toolbar label{display:flex;align-items:center;gap:8px;font-size:12px}
+.capture-prompt p{white-space:pre-line}
+.capture-take-preview video{object-fit:cover!important;object-position:center!important}
+.capture-take-preview{aspect-ratio:4/5}
+.capture-prompt-only .capture-camera{background:#050605!important}
+.capture-prompt-only .capture-prompt{top:17%!important;bottom:12%!important;height:auto!important;max-height:none!important;left:8%!important;right:8%!important;mask-image:linear-gradient(transparent,#000 7%,#000 93%,transparent)}
+.capture-prompt-only .capture-prompt p{max-width:900px}
+.capture-prompt-only .capture-prompt-remote{top:12px!important}
+@media(max-width:780px){
+ .capture-mode-toolbar{position:relative;z-index:22;gap:5px;padding:8px;background:#f3f3ef;margin:0}
+ .capture-mode-toolbar>div{flex:1;min-width:0}
+ .capture-mode-toolbar>div button{flex:1;padding:0 7px}
+ .capture-mode-toolbar>button{flex:1;white-space:nowrap}
+ .capture-mode-toolbar label{width:100%;justify-content:space-between}
+ .capture-mode-toolbar select{flex:1;max-width:75%}
+ .capture-camera{top:54px!important;height:calc(100dvh - 54px - 64px - env(safe-area-inset-bottom) - 62px)!important}
+ .capture-prompt-only .capture-mode-toolbar{position:fixed;top:env(safe-area-inset-top);left:0;right:0;background:#131512;color:#fff;z-index:510;padding:8px}
+ .capture-prompt-only .capture-mode-toolbar>div,.capture-prompt-only .capture-mode-toolbar>div button{display:none}
+ .capture-prompt-only .capture-mode-toolbar>button{background:#c8ff2f}
+ .capture-prompt-only .capture-camera{position:fixed!important;inset:0!important;width:100%!important;height:100dvh!important;z-index:400}
+ .capture-prompt-only .capture-prompt{top:20%!important;bottom:9%!important;height:auto!important;max-height:none!important;left:5%!important;right:5%!important}
+ .capture-prompt-only .capture-prompt p{font-size:min(var(--prompt-size),34px)!important}
+ .capture-prompt-only .capture-prompt-remote{top:110px!important}
+ .capture-take-preview{aspect-ratio:4/5!important;height:auto!important;min-height:105px}
+}
