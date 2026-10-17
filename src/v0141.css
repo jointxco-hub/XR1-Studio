@@ -44,3 +44,29 @@
  .capture-settings-button{font-size:11px!important}
  .capture-section-chip{pointer-events:none}
 }
+
+/* v0.14.3: camera-first mobile capture and continuous, native smooth scrolling */
+.capture-prompt{overflow-y:auto!important;overscroll-behavior:contain;scrollbar-width:none;mask-image:linear-gradient(transparent,#000 8%,#000 92%,transparent);pointer-events:auto}
+.capture-prompt::-webkit-scrollbar{display:none}
+.capture-prompt p{margin:0!important;padding:6px 0 38vh;font-weight:550!important;line-height:1.48!important;overflow-wrap:break-word;text-wrap:pretty}
+.capture-prompt-remote{position:absolute;z-index:12;top:12px;right:12px;display:flex;align-items:center;gap:6px}
+.capture-prompt-remote button{min-height:44px;padding:0 12px;border:1px solid rgba(255,255,255,.2);border-radius:10px;background:rgba(8,10,8,.82);color:#fff;font-size:12px;font-weight:650;backdrop-filter:blur(14px)}
+@media(max-width:780px){
+ .stage-content:has(.capture-stage){padding:0!important;width:100%!important}
+ .capture-heading{display:none!important}
+ .capture-camera{position:sticky!important;top:54px!important;height:calc(100dvh - 54px - 64px - env(safe-area-inset-bottom))!important;min-height:0!important;overflow:hidden;z-index:20}
+ .capture-immersive .capture-camera{position:fixed!important;inset:0!important;height:100dvh!important;min-height:0!important;width:100%!important;z-index:400}
+ .capture-prompt{top:18%!important;bottom:auto!important;left:5%!important;right:5%!important;height:42%!important;max-height:42%!important;min-height:0!important;padding:12px!important;background:linear-gradient(180deg,rgba(0,0,0,.5),rgba(0,0,0,.2))!important;pointer-events:auto!important}
+ .capture-prompt.prompt-centre{top:28%!important}.capture-prompt.prompt-low{top:37%!important}
+ .capture-prompt p{font-size:clamp(20px,var(--prompt-size),40px)!important}
+ .capture-prompt-remote{top:56px;left:10px;right:10px;justify-content:center}
+ .capture-prompt-remote button:first-child{flex:1;max-width:220px}
+ .capture-controls{bottom:12px!important;left:10px!important;right:10px!important;z-index:25!important}
+ .capture-controls .capture-record,.capture-controls .capture-stop{width:66px!important;height:66px!important}
+ .capture-controls .capture-settings-button{display:none!important}
+ .capture-settings-sheet{z-index:500!important}
+ .capture-session{position:relative;z-index:1}
+ .post-take{z-index:35!important}
+ .capture-empty{z-index:1}
+ .capture-prompt{z-index:4}
+}
