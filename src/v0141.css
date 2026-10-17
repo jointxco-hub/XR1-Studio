@@ -140,3 +140,41 @@
  .capture-prompt-only .capture-prompt{top:calc(env(safe-area-inset-top) + 132px)!important;bottom:calc(16px + env(safe-area-inset-bottom))!important;padding:8px 12px!important}
  .capture-prompt-only .capture-prompt p{padding-top:18px!important}
 }
+
+/* v0.14.7 — compact external teleprompter reading polish */
+.capture-prompt-only .capture-prompt{
+  text-align:center!important;
+  mask-image:linear-gradient(to bottom,transparent 0%,#000 8%,#000 88%,transparent 100%)!important;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 8%,#000 88%,transparent 100%)!important;
+}
+.capture-prompt-only .capture-prompt p{
+  max-width:740px!important;
+  margin-inline:auto!important;
+  font-weight:480!important;
+  line-height:1.5!important;
+}
+@media(max-width:780px){
+ .capture-prompt-only .capture-mode-toolbar{justify-content:flex-start!important}
+ .capture-prompt-only .capture-mode-toolbar>button{
+   min-height:42px!important;
+   width:auto!important;
+   flex:0 0 auto!important;
+   padding:0 12px!important;
+   font-size:12px!important;
+   font-weight:650!important;
+   box-shadow:none!important;
+ }
+ .capture-prompt-only .capture-prompt{
+   left:7%!important;
+   right:7%!important;
+   top:calc(env(safe-area-inset-top) + 130px)!important;
+   bottom:calc(22px + env(safe-area-inset-bottom))!important;
+ }
+ .capture-prompt-only .capture-prompt p{
+   font-size:var(--prompt-size)!important;
+   line-height:1.48!important;
+   font-weight:480!important;
+   letter-spacing:-.018em!important;
+   padding-top:22px!important;
+ }
+}
