@@ -6,7 +6,7 @@ import { useMediaRecorder } from '../../hooks/useMediaRecorder'
 import { useWakeLock } from '../../hooks/useWakeLock'
 import { deleteMedia, persistMedia } from '../../lib/mediaStorage'
 import { createTakeAndAsset, preferredTakeClips } from './takeFactory'
-import { PROMPT_POSITION_KEY, punctuationDelay, readPromptPosition, type PromptPosition } from './promptPreferences'
+import { PROMPT_POSITION_KEY, readPromptPosition, type PromptPosition } from './promptPreferences'
 import { takeSaveLabel, unavailableTakeCopy, type TakeSaveStatus } from './recordingPresentation'
 
 type Props={project:Project;setProject:React.Dispatch<React.SetStateAction<Project>>;notify:(message:string)=>void;onNext:()=>void;initialBlockId?:string}
@@ -15,7 +15,7 @@ const time=(seconds:number)=>`${String(Math.floor(seconds/60)).padStart(2,'0')}:
 
 export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:Props){
   const [activeBlockId,setActiveBlockId]=useState(initialBlockId||project.blocks[0]?.id||''),[facingMode,setFacingMode]=useState<'user'|'environment'>('user'),[mirrored,setMirrored]=useState(true),[settings,setSettings]=useState(false)
-  const [promptVisible,setPromptVisible]=useState(true),[promptPlaying,setPromptPlaying]=useState(false),[promptWord,setPromptWord]=useState(0),[wpm,setWpm]=useState(125),[fontSize,setFontSize]=useState(32),[position,setPosition]=useState<PromptPosition>(()=>readPromptPosition(localStorage)),[readingMode,setReadingMode]=useState<'clean'|'line'|'words'>(()=>{try{const saved=localStorage.getItem('xr1-reading-mode');return saved==='line'||saved==='words'?saved:'clean'}catch{return'clean'}})
+  const [promptVisible,setPromptVisible]=useState(true),[promptPlaying,setPromptPlaying]=useState(false),[wpm,setWpm]=useState(125),[fontSize,setFontSize]=useState(32),[position,setPosition]=useState<PromptPosition>(()=>readPromptPosition(localStorage)),[readingMode,setReadingMode]=useState<'clean'|'line'|'words'>(()=>{try{const saved=localStorage.getItem('xr1-reading-mode');return saved==='line'||saved==='words'?saved:'clean'}catch{return'clean'}})
   const [preview,setPreview]=useState<Take|null>(null),[lastTake,setLastTake]=useState<Take|null>(null),[saveStatus,setSaveStatus]=useState<TakeSaveStatus>('durable'),[takeMenu,setTakeMenu]=useState<string|null>(null)
   const importInput=useRef<HTMLInputElement>(null),videoRef=useRef<HTMLVideoElement>(null),promptScrollRef=useRef<HTMLDivElement>(null),promptFrameRef=useRef<number|null>(null),devices=useMediaDevices(),activeBlock=project.blocks.find(block=>block.id===activeBlockId)??project.blocks[0]
   const words=useMemo(()=>activeBlock?.text.trim().split(/\s+/).filter(Boolean)||[],[activeBlock?.text])
@@ -34,7 +34,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
   useEffect(()=>{document.body.classList.toggle('xr1-recording',recording);return()=>document.body.classList.remove('xr1-recording')},[recording])
   useEffect(()=>{if(!recording)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='Recording is still in progress.'};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard)},[recording])
   useEffect(()=>{try{localStorage.setItem(PROMPT_POSITION_KEY,position);localStorage.setItem('xr1-reading-mode',readingMode)}catch{/* Preference remains for this session. */}},[position,readingMode])
-  useEffect(()=>{setPromptWord(0);setPromptPlaying(false)},[activeBlockId])
+  useEffect(()=>{setPromptPlaying(false)},[activeBlockId])
   useEffect(()=>{const node=promptScrollRef.current;if(node){node.scrollTop=0}setPromptPlaying(false)},[activeBlockId])
   useEffect(()=>{if(!promptPlaying||!promptVisible)return;const node=promptScrollRef.current;if(!node)return
     let previous=0;const tick=(now:number)=>{if(!previous)previous=now;const delta=Math.min(80,now-previous);previous=now
