@@ -37,10 +37,11 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
   useEffect(()=>{setPromptPlaying(false)},[activeBlockId])
   useEffect(()=>{const node=promptScrollRef.current;if(node){node.scrollTop=0}setPromptPlaying(false)},[activeBlockId])
   useEffect(()=>{if(!promptPlaying||!promptVisible)return;const node=promptScrollRef.current;if(!node)return
-    let previous=0;const tick=(now:number)=>{if(!previous)previous=now;const delta=Math.min(80,now-previous);previous=now
+    let previous=0;let preciseOffset=node.scrollTop;const tick=(now:number)=>{if(!previous)previous=now;const delta=Math.min(80,now-previous);previous=now
       const pixelsPerSecond=(wpm/60)*(fontSize*.57)*5.5/5
-      node.scrollTop+=pixelsPerSecond*delta/1000
-      if(node.scrollTop>=node.scrollHeight-node.clientHeight-2){setPromptPlaying(false);return}
+      preciseOffset+=pixelsPerSecond*delta/1000
+      node.scrollTop=preciseOffset
+      if(preciseOffset>=node.scrollHeight-node.clientHeight-2){setPromptPlaying(false);return}
       promptFrameRef.current=requestAnimationFrame(tick)}
     promptFrameRef.current=requestAnimationFrame(tick)
     return()=>{if(promptFrameRef.current!==null)cancelAnimationFrame(promptFrameRef.current);promptFrameRef.current=null}
@@ -59,7 +60,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
     {!recording&&<header className="capture-heading"><div><span>04 / RECORD</span><h1>Deliver naturally.</h1><p>Choose a section, frame the shot, then record. Each take saves directly into Files.</p></div><button className="primary" onClick={()=>setPromptVisible(value=>!value)}>{promptVisible?'Hide':'Show'} prompter</button></header>}
     <div className="capture-layout"><section className="capture-camera">
       <video ref={videoRef} autoPlay muted playsInline className={mirrored?'mirrored':''}/>
-      {!media.stream&&<div className="capture-empty"><b>{media.capability.supported?'Ready for a take':'Recording unavailable'}</b><p>{media.error||media.capability.reason||'Choose a section, then tap Record once.'}</p></div>}
+      {!media.stream&&!promptVisible&&<div className="capture-empty"><b>{media.capability.supported?'Ready for a take':'Recording unavailable'}</b><p>{media.error||media.capability.reason||'Choose a section, then tap Record once.'}</p></div>}
       {promptVisible&&activeBlock&&<div ref={promptScrollRef} className={`capture-prompt prompt-${position} reading-${readingMode} ${promptPlaying?'playing':''}`} style={{'--prompt-size':`${fontSize}px`} as React.CSSProperties}><p>{activeBlock.text}</p></div>}
       <div className="capture-prompt-remote">
         <button onClick={()=>setPromptPlaying(value=>!value)} disabled={!promptVisible||!words.length} aria-label={promptPlaying?'Pause teleprompter':'Start teleprompter'}>{promptPlaying?'Ⅱ Pause prompt':'▶ Run prompt'}</button>
