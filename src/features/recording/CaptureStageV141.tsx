@@ -24,7 +24,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
   const words=useMemo(()=>promptText.trim().split(/\s+/).filter(Boolean),[promptText])
   const media=useMediaRecorder({cameraId:devices.cameraId,microphoneId:devices.microphoneId,facingMode,onComplete:async recording=>{
     const id=makeId(),createdAt=new Date().toISOString(),url=URL.createObjectURL(recording.blob),section=captureSnapshot.current?.section||activeBlock?.label||'Recording'
-    const {take,asset}=createTakeAndAsset({id,projectId:project.id,scriptBlockId:captureSnapshot.current?.blockId??activeBlock?.id,section,takeNumber:project.takes.filter(item=>item.section===section).length+1,durationSeconds:recording.durationSeconds,mimeType:recording.mimeType,size:recording.blob.size,createdAt,url,cameraLabel:recording.cameraLabel,microphoneLabel:recording.microphoneLabel})
+    const {take,asset}=createTakeAndAsset({id,projectId:project.id,scriptBlockId:captureSnapshot.current?.section==='Full script'?undefined:captureSnapshot.current?.blockId??activeBlock?.id,section,takeNumber:project.takes.filter(item=>item.section===section).length+1,durationSeconds:recording.durationSeconds,mimeType:recording.mimeType,size:recording.blob.size,createdAt,url,cameraLabel:recording.cameraLabel,microphoneLabel:recording.microphoneLabel})
     setProject(current=>({...current,takes:[...current.takes,take],resources:[...current.resources,asset],updatedAt:createdAt}));setLastTake(take);setSaveStatus('saving')
     void posterFromVideo(url).then(posterUrl=>posterUrl&&setProject(current=>({...current,resources:current.resources.map(item=>item.id===id?{...item,posterUrl}:item)})))
     try{await persistMedia({id,blob:recording.blob,name:asset.name,mime:asset.mime,projectId:project.id,createdAt});setProject(current=>({...current,resources:current.resources.map(item=>item.id===id?{...item,persistence:'durable'}:item)}));setSaveStatus('durable');notify(`${take.label} saved to Files`)}
@@ -32,7 +32,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
   }})
   const recording=media.state==='recording'||media.state==='paused',busy=['requesting_permission','preparing_recording','stopping','processing'].includes(media.state)
   useWakeLock(recording||promptPlaying||promptOnly)
-  useEffect(()=>{if(videoRef.current)videoRef.current.srcObject=media.stream},[media.stream])
+  useEffect(()=>{if(videoRef.current)videoRef.current.srcObject=media.stream},[media.stream,promptOnly])
   useEffect(()=>{if(media.stream)void devices.refresh()},[media.stream,devices.refresh])
   useEffect(()=>{document.body.classList.toggle('xr1-recording',recording);return()=>document.body.classList.remove('xr1-recording')},[recording])
   useEffect(()=>{if(!recording)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='Recording is still in progress.'};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard)},[recording])
