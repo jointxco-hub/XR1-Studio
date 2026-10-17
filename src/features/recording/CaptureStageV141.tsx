@@ -63,7 +63,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
     {!recording&&<header className="capture-heading"><div><span>04 / RECORD</span><h1>Deliver naturally.</h1><p>Choose a section, frame the shot, then record. Each take saves directly into Files.</p></div><button className="primary" onClick={()=>setPromptVisible(value=>!value)}>{promptVisible?'Hide':'Show'} prompter</button></header>}
     <div className="capture-mode-toolbar">
       <div role="group" aria-label="Capture mode"><button className={captureMode==='section'?'active':''} disabled={recording||busy} onClick={()=>{setCaptureMode('section');setPromptPlaying(false)}}>By section</button><button className={captureMode==='full'?'active':''} disabled={recording||busy} onClick={()=>{setCaptureMode('full');setPromptPlaying(false)}}>Full script</button></div>
-      <button disabled={recording||busy} onClick={()=>{setPromptOnly(value=>!value);setPromptPlaying(false);setSettings(false);setPromptVisible(true)}}>{promptOnly?'Exit teleprompter only':'Teleprompter only ↗'}</button>
+      <button disabled={recording||busy} onClick={()=>{if(!promptOnly)setCaptureMode('full');setPromptOnly(value=>!value);setPromptPlaying(false);setSettings(false);setPromptVisible(true)}}>{promptOnly?'Exit teleprompter only':'Teleprompter only ↗'}</button>
       {captureMode==='full'&&<label>Start at <select disabled={recording||busy} value={fullStartId||project.blocks[0]?.id||''} onChange={e=>setFullStartId(e.target.value)}>{project.blocks.map(block=><option key={block.id} value={block.id}>{block.label}</option>)}</select></label>}
     </div>
     <div className="capture-layout"><section className="capture-camera">
