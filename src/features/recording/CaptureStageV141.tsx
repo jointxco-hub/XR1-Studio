@@ -38,7 +38,7 @@ export function CaptureStage({project,setProject,notify,onNext,initialBlockId}:P
   useEffect(()=>{if(!recording)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='Recording is still in progress.'};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard)},[recording])
   useEffect(()=>{try{localStorage.setItem(PROMPT_POSITION_KEY,position);localStorage.setItem('xr1-reading-mode',readingMode)}catch{/* Preference remains for this session. */}},[position,readingMode])
   useEffect(()=>{setPromptPlaying(false)},[activeBlockId])
-  useEffect(()=>{const node=promptScrollRef.current;if(node){node.scrollTop=0}setPromptPlaying(false)},[activeBlockId,captureMode,fullStartId])
+  useEffect(()=>{setPromptPlaying(false);const frame=requestAnimationFrame(()=>{if(promptScrollRef.current)promptScrollRef.current.scrollTop=0});return()=>cancelAnimationFrame(frame)},[activeBlockId,captureMode,fullStartId,promptOnly])
   useEffect(()=>{if(!promptPlaying||!promptVisible)return;const node=promptScrollRef.current;if(!node)return
     let previous=0;let preciseOffset=node.scrollTop;const tick=(now:number)=>{if(!previous)previous=now;const delta=Math.min(80,now-previous);previous=now
       const pixelsPerSecond=(wpm/60)*(fontSize*.57)*5.5/5
